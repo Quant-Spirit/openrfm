@@ -1,0 +1,47 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-ratebeer",
+ "task": "user-count",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "users",
+   "columns": [
+    "user_id",
+    "created_at",
+    "user_type",
+    "beer_rating_count",
+    "avg_beer_rating",
+    "place_rating_count",
+    "favorite_count",
+    "total_activity_count"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "users__snapshot",
+   "entity": "user_id",
+   "blocks": [
+    {
+     "name": "rating_activity",
+     "sql": "SELECT e.user_id, e.timestamp, count(r.rating_id) AS ratings_all_time, count(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '7 day') AS ratings_7d, count(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '30 day') AS ratings_30d, count(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '90 day') AS ratings_90d, count(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '180 day' AND r.created_at < e.timestamp - INTERVAL '90 day') AS ratings_previous_90d, count(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '365 day') AS ratings_365d, count(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '365 day' AND r.created_at < e.timestamp - INTERVAL '275 day') AS ratings_upcoming_season_last_year, count(DISTINCT CAST(r.created_at AS DATE)) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '90 day') AS active_days_90d, date_diff('second', max(r.created_at), e.timestamp) / 86400.0 AS days_since_last_rating FROM eval_table e LEFT JOIN beer_ratings r ON r.user_id = e.user_id AND r.created_at < e.timestamp GROUP BY e.user_id, e.timestamp"
+    },
+    {
+     "name": "account_age",
+     "sql": "SELECT e.user_id, e.timestamp, date_diff('second', u.created_at, e.timestamp) / 86400.0 AS account_age_days FROM eval_table e LEFT JOIN users u ON u.user_id = e.user_id AND u.created_at <= e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "user_recent_corating_peers",
+   "entity": "user_id",
+   "sql": "WITH own_beers AS (SELECT e.user_id, e.timestamp, r.beer_id, max(r.created_at) AS last_own_rating FROM eval_table e JOIN beer_ratings r ON r.user_id = e.user_id AND r.created_at < e.timestamp AND r.created_at >= e.timestamp - INTERVAL '90 day' GROUP BY e.user_id, e.timestamp, r.beer_id QUALIFY row_number() OVER (PARTITION BY e.user_id, e.timestamp ORDER BY max(r.created_at) DESC, r.beer_id) <= 5), shared AS (SELECT o.user_id, o.timestamp, p.user_id AS peer_user_id, count(DISTINCT o.beer_id) AS shared_beers_90d, max(p.created_at) AS last_peer_shared_rating FROM own_beers o JOIN beer_ratings p ON p.beer_id = o.beer_id AND p.user_id <> o.user_id AND p.created_at < o.timestamp AND p.created_at >= o.timestamp - INTERVAL '90 day' GROUP BY o.user_id, o.timestamp, p.user_id), chosen AS (SELECT * FROM shared QUALIFY row_number() OVER (PARTITION BY user_id, timestamp ORDER BY shared_beers_90d DESC, last_peer_shared_rating DESC, peer_user_id) <= 2), historical AS (SELECT c.user_id, c.timestamp, c.peer_user_id, c.shared_beers_90d, c.last_peer_shared_rating, m.timestamp AS historical_timestamp, m.label_window_end AS historical_window_end, m.num_ratings AS historical_num_ratings FROM chosen c LEFT JOIN matured_labels m ON m.user_id = c.peer_user_id AND m.timestamp < c.timestamp AND m.label_window_end < c.timestamp QUALIFY row_number() OVER (PARTITION BY c.user_id, c.timestamp, c.peer_user_id ORDER BY m.timestamp DESC NULLS LAST, m.label_window_end DESC NULLS LAST) = 1) SELECT h.user_id, h.timestamp, h.peer_user_id, h.shared_beers_90d, date_diff('second', h.last_peer_shared_rating, h.timestamp) / 86400.0 AS days_since_peer_shared_rating, h.historical_timestamp, h.historical_window_end, h.historical_num_ratings, CASE WHEN h.historical_timestamp IS NOT NULL THEN count(r.rating_id) ELSE NULL END AS historical_preceding_ratings_90d FROM historical h LEFT JOIN beer_ratings r ON r.user_id = h.peer_user_id AND r.created_at < h.timestamp AND r.created_at < h.historical_timestamp AND r.created_at >= h.historical_timestamp - INTERVAL '90 day' GROUP BY h.user_id, h.timestamp, h.peer_user_id, h.shared_beers_90d, h.last_peer_shared_rating, h.historical_timestamp, h.historical_window_end, h.historical_num_ratings",
+   "max_rows_per_case": 2,
+   "fkeys": {
+    "peer_user_id": "users"
+   }
+  }
+ ]
+}

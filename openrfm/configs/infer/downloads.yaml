@@ -1,0 +1,52 @@
+# Downloads of the benchmark databases and their sha256 (`openrfm download`). RelBench files come from the official
+# RelBench server and are unzipped into DATA/<db>/{db,tasks}. The 4DBInfer archives are the unchanged official
+# releases (originally served at https://data.dgl.ai/mtbench/, which no longer resolves), mirrored in the Hugging Face
+# dataset repository `repo`, each under the terms of its source; each is extracted under DATA/raw/ and written in RelBench layout
+# (openrfm.infer.dbinfer). RelBench's own 4DBInfer conversion renumbers primary keys without remapping the foreign keys
+# that reference them, so it is not used.
+relbench:
+  url: https://relbench.stanford.edu/download/
+  files:
+    rel-amazon/db.zip: db71c7701b892a4eb7481ff04d14d25465795501dba3a5931aabee9930805efe
+    rel-amazon/tasks/item-churn.zip: 46ff6feac532ed6568a6938ad6725298057bdd970350aa6e918640e8e55bd4e1
+    rel-amazon/tasks/item-ltv.zip: 987953d1deecb9ed6925576a6f073a59d34ada03a037219919e801ec098225ea
+    rel-amazon/tasks/user-churn.zip: cddd511a1f609aea286cf2e20803f489ab9b3158e18cea66e0888d174b1515f0
+    rel-amazon/tasks/user-ltv.zip: 645d6d318e7da4f493c6953e24ab62ffdd6f4d0ba64726b5e3b36df4ba8a1a18
+    rel-arxiv/db.zip: b7db1bc1aa17a6d79e0cf102fe3f258920a610f58ad8f8891169676fc120bc5c
+    rel-arxiv/tasks/author-publication.zip: 2573f95da55862c1e0d47a6cdfe79ec4f3d2038399f458eaeec4c76d575244da
+    rel-arxiv/tasks/paper-citation.zip: a8701626e5ec6a1af3486d5a605caa1020dcdffdaf38135c0e029161ef947fa3
+    rel-avito/db.zip: 274e692295027a753063b9201815a9d2dea94d4cda968be81be936f546d77058
+    rel-avito/tasks/ad-ctr.zip: ea6cc327820282965fd129d0f22f391ffaa4c02ff346cc7a96c9b4fb020032e8
+    rel-avito/tasks/user-clicks.zip: 4d4bb702c334553022af6426dd6ef15a58d31ab9881ef38df575eb359f06a9c6
+    rel-avito/tasks/user-visits.zip: 935d29fab5cb269fd5f0a98c252bd8cdd31d7d7bef227150618bbaf80fbc437e
+    rel-event/db.zip: 2593477065e1090af0258c07769ec22f40dad01f035613ccf35258b924d8b066
+    rel-event/tasks/user-attendance.zip: ab8500ed7f9fd3782f1688f2596c88034489123012ae21f3cf49d3713af674b5
+    rel-event/tasks/user-ignore.zip: 5c7b40da7102336cf6ea2628c403a651005c9257b5f8d67fcebdb0a16f1d4fb1
+    rel-event/tasks/user-repeat.zip: f36f52c66621802e211f0b2a5cfa1ceaf19d2f9afabe97da97bc1058ee1aa64b
+    rel-f1/db.zip: ec31a4e1bc2b2f9c36c05fcd3dfe2a40a506f335dc51ce79c3ec8bb40feb1482
+    rel-f1/tasks/driver-dnf.zip: bd562529a3c0016363d5cae247979fd3712d77ba948574f135dab88c036d3e2d
+    rel-f1/tasks/driver-position.zip: 775b28a51604169539bbe712a2f0d15158c112bc6abf316cdd0995087a7ae03e
+    rel-f1/tasks/driver-top3.zip: 1a16abf993cbe58524054cf710bada8538e7c75d6f8f388c0b137ab3575a9a47
+    rel-hm/db.zip: 3fb2aa3c978cc388aa81f43f9404fed329b502104ff58f3ee435959ab95e7029
+    rel-hm/tasks/item-sales.zip: 92a2c71ebd6dc5ab67c14c33a3a45c9ccafee0e5f0c7c698871a88f74e8a0867
+    rel-hm/tasks/user-churn.zip: 2ef2030e308c57b5bcb4b2df1458cc3c21b7286e0b658d222be010b4f90e9265
+    rel-ratebeer/db.zip: 49afdf23a8b464dc0e54731a3782b51e53f3acee93dae0aa6d968cfbd9caa4be
+    rel-ratebeer/tasks/beer-churn.zip: 6abae48a8d176119c0d110b0ca40d78f7a84f23373e9c58c80a8cf8b92f08dd8
+    rel-ratebeer/tasks/brewer-dormant.zip: 3abf73c229c04d159ad2ec1da1e81765f33e6c40bccfe3b29d58a59dc4a3f36a
+    rel-ratebeer/tasks/user-churn.zip: 9d5f91907475ad2d7ea2c61dcbfe1d2b48e8a7448431727cd163712cf0dc7875
+    rel-ratebeer/tasks/user-count.zip: 1a800f71eff5a7ef54a79bdb88596b01ce96c43cf59be526e5dc2beaf04d6d88
+    rel-stack/db.zip: f1374fda2828f62ac98e360f969dbf76a8a6404f6691b0a27a521d0730e22ec3
+    rel-stack/tasks/post-votes.zip: b22bb869c4a42db74e880e668e5fb7cd6218b6e706d175cf78eef836a20021ed
+    rel-stack/tasks/user-badge.zip: b00196c99484619084e96fcd2874b4c94ea29a714c80272a3636c79bdbfe525e
+    rel-stack/tasks/user-engagement.zip: 98141d35e6471e6a4d391461c1ccf2bfb3aa363975e1c11e992223c1b2a82b2d
+    rel-trial/db.zip: 9fb5ba14f7cbca8115f3dfe0800415f98d6ddc15561e56c35ee614da6b89552a
+    rel-trial/tasks/site-success.zip: a382e1712883e875e628564d8e2998bc6c8bc5bb21158b11a754037b1f0ae3ce
+    rel-trial/tasks/study-adverse.zip: e0c696b65429c56170fb8dc3bc16f5c37e08f31c7d70890032f5c8f8281238ff
+    rel-trial/tasks/study-outcome.zip: 20eb922c1a8f894563f4b4c900c912e396688d2bd71eeb6b13f19429aa74a649
+dbinfer:
+  repo: zkchen/openrfm-4dbinfer
+  files:
+    amazon-4db: [20240304-amazon.tar, 28eddd41cdd76b3b48da8d18f627dcd6495ab4747ac56cca7d45053f761578c3]
+    outbrain-4db: [20240304-outbrain-small.tar, c1241e5b4f5659a570f3dfb820992b25d42e730260dfd0e134380c8aa488d855]
+    retailrocket-4db: [20240304-retailrocket.tar, 54df293f8ad8487bdce944b8bf88032e4fdeafddb2d3ef3cb568d4b35188e95e]
+    stackexchange-4db: [20240304-stackexchange.tar, bad013286e2b24c9a747eb4952eb465090c9af8a4df5f646714d00171804355b]

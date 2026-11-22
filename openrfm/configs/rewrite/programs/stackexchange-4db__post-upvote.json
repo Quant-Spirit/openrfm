@@ -1,0 +1,78 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "stackexchange-4db",
+ "task": "post-upvote",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "Posts",
+   "columns": [
+    "Id",
+    "CreationDate",
+    "PostTypeId",
+    "ParentId",
+    "Title",
+    "Body"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "Tag",
+   "columns": [
+    "Id",
+    "TagName"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "Posts__snapshot",
+   "entity": "Id",
+   "blocks": [
+    {
+     "name": "content_and_author_tenure",
+     "sql": "SELECT e.Id,e.CreationDate,date_diff('second',p.CreationDate,e.CreationDate)/86400.0 AS post_age_days,length(coalesce(p.Title,'')) AS title_length,length(coalesce(p.Body,'')) AS body_length,(length(coalesce(p.Body,''))-length(replace(coalesce(p.Body,''),'<code>','')))/6.0 AS code_blocks,(length(coalesce(p.Body,''))-length(replace(coalesce(p.Body,''),'<a ','')))/3.0 AS links,length(coalesce(p.Body,''))-length(replace(coalesce(p.Body,''),'?','')) AS question_marks,extract(dow FROM e.CreationDate) AS cutoff_weekday,extract(hour FROM e.CreationDate) AS cutoff_hour,extract(month FROM e.CreationDate) AS cutoff_month,u.Id IS NOT NULL AS known_author,date_diff('day',u.CreationDate,e.CreationDate) AS author_tenure_days,length(coalesce(u.AboutMe,'')) AS author_profile_length FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id AND p.CreationDate<=e.CreationDate LEFT JOIN Users u ON u.Id=p.OwnerUserId AND u.CreationDate<e.CreationDate"
+    },
+    {
+     "name": "observed_post_activity",
+     "sql": "SELECT e.Id,e.CreationDate,v.upvotes,v.downvotes,v.upvotes_7d,v.upvotes_30d,v.days_since_last_upvote,c.comments,c.comments_7d FROM eval_table e LEFT JOIN LATERAL (SELECT count(*) FILTER (WHERE x.VoteTypeId=2) AS upvotes,count(*) FILTER (WHERE x.VoteTypeId=3) AS downvotes,count(*) FILTER (WHERE x.VoteTypeId=2 AND x.CreationDate>=e.CreationDate-INTERVAL '7 days') AS upvotes_7d,count(*) FILTER (WHERE x.VoteTypeId=2 AND x.CreationDate>=e.CreationDate-INTERVAL '30 days') AS upvotes_30d,date_diff('second',max(x.CreationDate) FILTER (WHERE x.VoteTypeId=2),e.CreationDate)/86400.0 AS days_since_last_upvote FROM Vote x WHERE x.PostId=e.Id AND x.CreationDate<e.CreationDate) v ON true LEFT JOIN LATERAL (SELECT count(*) AS comments,count(*) FILTER (WHERE x.CreationDate>=e.CreationDate-INTERVAL '7 days') AS comments_7d FROM Comments x WHERE x.PostId=e.Id AND x.CreationDate<e.CreationDate) c ON true"
+    },
+    {
+     "name": "author_track_record",
+     "sql": "WITH history AS (SELECT e.Id,e.CreationDate,p.PostTypeId AS focal_type,h.Id AS history_post_id,h.CreationDate AS history_created,h.PostTypeId AS history_type FROM eval_table e LEFT JOIN Posts p ON p.Id=e.Id AND p.CreationDate<=e.CreationDate LEFT JOIN Posts h ON h.OwnerUserId=p.OwnerUserId AND h.Id<>e.Id AND h.CreationDate<e.CreationDate), per_post AS (SELECT h.Id,h.CreationDate,h.focal_type,h.history_post_id,h.history_created,h.history_type,count(v.Id) FILTER (WHERE v.VoteTypeId=2) AS upvotes,count(v.Id) FILTER (WHERE v.VoteTypeId=3) AS downvotes,count(v.Id) FILTER (WHERE v.VoteTypeId=2 AND v.CreationDate>=h.CreationDate-INTERVAL '30 days') AS recent_upvotes FROM history h LEFT JOIN Vote v ON v.PostId=h.history_post_id AND v.CreationDate<h.CreationDate GROUP BY h.Id,h.CreationDate,h.focal_type,h.history_post_id,h.history_created,h.history_type) SELECT s.Id,s.CreationDate,count(s.history_post_id) AS author_prior_posts,count(s.history_post_id) FILTER (WHERE s.history_type=1) AS author_prior_questions,count(s.history_post_id) FILTER (WHERE s.history_type=2) AS author_prior_answers,count(s.history_post_id) FILTER (WHERE s.history_type=s.focal_type) AS author_prior_same_type,count(s.history_post_id) FILTER (WHERE s.history_created>=s.CreationDate-INTERVAL '7 days') AS author_posts_7d,count(s.history_post_id) FILTER (WHERE s.history_created>=s.CreationDate-INTERVAL '30 days') AS author_posts_30d,date_diff('second',max(s.history_created),s.CreationDate)/86400.0 AS author_days_since_last_post,sum(s.upvotes) AS author_received_upvotes,sum(s.downvotes) AS author_received_downvotes,sum(s.recent_upvotes) AS author_received_upvotes_30d,count(s.history_post_id) FILTER (WHERE s.upvotes>0) AS author_posts_with_upvotes,count(m.Target) AS author_matured_cases,(coalesce(sum(CAST(m.Target AS INTEGER)),0)+1.0)/(count(m.Target)+2.0) AS author_matured_positive_rate,count(m.Target) FILTER (WHERE s.history_type=s.focal_type) AS author_same_type_matured_cases,(coalesce(sum(CAST(m.Target AS INTEGER)) FILTER (WHERE s.history_type=s.focal_type),0)+1.0)/(count(m.Target) FILTER (WHERE s.history_type=s.focal_type)+2.0) AS author_same_type_matured_positive_rate FROM per_post s LEFT JOIN LATERAL (SELECT ml.Target FROM matured_labels ml WHERE ml.Id=s.history_post_id AND ml.Id<>s.Id AND ml.CreationDate<s.CreationDate AND ml.label_window_end<s.CreationDate ORDER BY ml.CreationDate DESC,ml.label_window_end DESC,ml.Target DESC LIMIT 1) m ON true GROUP BY s.Id,s.CreationDate"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "author_post_peers",
+   "entity": "Id",
+   "max_rows_per_case": 8,
+   "fkeys": {
+    "PeerPostId": "Posts"
+   },
+   "sql": "WITH ranked AS (SELECT e.Id,e.CreationDate,h.Id AS PeerPostId,h.CreationDate AS peer_created,h.PostTypeId=p.PostTypeId AS same_post_type FROM eval_table e JOIN Posts p ON p.Id=e.Id AND p.CreationDate<=e.CreationDate JOIN Posts h ON h.OwnerUserId=p.OwnerUserId AND h.Id<>e.Id AND h.CreationDate<e.CreationDate QUALIFY row_number() OVER (PARTITION BY e.Id,e.CreationDate ORDER BY CASE WHEN h.PostTypeId=p.PostTypeId THEN 0 ELSE 1 END,h.CreationDate DESC,h.Id DESC)<=8) SELECT r.Id,r.CreationDate,r.PeerPostId,r.same_post_type,date_diff('second',r.peer_created,r.CreationDate)/86400.0 AS peer_age_days,v.upvotes,v.downvotes,v.upvotes_first_30d,r.peer_created+INTERVAL '30 days'<r.CreationDate AS first_30d_complete,m.Target AS matured_outcome,date_diff('day',m.label_window_end,r.CreationDate) AS days_since_outcome_matured FROM ranked r LEFT JOIN LATERAL (SELECT count(*) FILTER (WHERE x.VoteTypeId=2) AS upvotes,count(*) FILTER (WHERE x.VoteTypeId=3) AS downvotes,count(*) FILTER (WHERE x.VoteTypeId=2 AND x.CreationDate<r.peer_created+INTERVAL '30 days') AS upvotes_first_30d FROM Vote x WHERE x.PostId=r.PeerPostId AND x.CreationDate<r.CreationDate) v ON true LEFT JOIN LATERAL (SELECT ml.Target,ml.label_window_end FROM matured_labels ml WHERE ml.Id=r.PeerPostId AND ml.Id<>r.Id AND ml.CreationDate<r.CreationDate AND ml.label_window_end<r.CreationDate ORDER BY ml.CreationDate DESC,ml.label_window_end DESC,ml.Target DESC LIMIT 1) m ON true"
+  },
+  {
+   "type": "derived_table",
+   "name": "parent_question_context",
+   "entity": "Id",
+   "max_rows_per_case": 1,
+   "fkeys": {
+    "QuestionId": "Posts"
+   },
+   "sql": "WITH thread AS (SELECT e.Id,e.CreationDate,q.Id AS QuestionId,q.CreationDate AS question_created FROM eval_table e JOIN Posts p ON p.Id=e.Id AND p.CreationDate<=e.CreationDate JOIN Posts q ON q.Id=p.ParentId AND q.CreationDate<e.CreationDate), answer_votes AS (SELECT t.Id,t.CreationDate,a.Id AS AnswerId,a.CreationDate AS answer_created,count(v.Id) FILTER (WHERE v.VoteTypeId=2) AS answer_upvotes FROM thread t LEFT JOIN Posts a ON a.ParentId=t.QuestionId AND a.PostTypeId=2 AND a.Id<>t.Id AND a.CreationDate<t.CreationDate LEFT JOIN Vote v ON v.PostId=a.Id AND v.CreationDate<t.CreationDate GROUP BY t.Id,t.CreationDate,a.Id,a.CreationDate), competition AS (SELECT Id,CreationDate,count(AnswerId) AS prior_answers,count(AnswerId) FILTER (WHERE answer_created>=CreationDate-INTERVAL '7 days') AS prior_answers_7d,coalesce(max(answer_upvotes),0) AS best_prior_answer_upvotes,coalesce(sum(answer_upvotes),0) AS total_prior_answer_upvotes,date_diff('second',max(answer_created),CreationDate)/86400.0 AS days_since_last_answer FROM answer_votes GROUP BY Id,CreationDate) SELECT t.Id,t.CreationDate,t.QuestionId,date_diff('second',t.question_created,t.CreationDate)/86400.0 AS question_age_days,v.question_upvotes,v.question_downvotes,v.question_upvotes_7d,c.prior_answers,c.prior_answers_7d,c.best_prior_answer_upvotes,c.total_prior_answer_upvotes,c.days_since_last_answer FROM thread t JOIN competition c ON c.Id=t.Id AND c.CreationDate=t.CreationDate LEFT JOIN LATERAL (SELECT count(*) FILTER (WHERE x.VoteTypeId=2) AS question_upvotes,count(*) FILTER (WHERE x.VoteTypeId=3) AS question_downvotes,count(*) FILTER (WHERE x.VoteTypeId=2 AND x.CreationDate>=t.CreationDate-INTERVAL '7 days') AS question_upvotes_7d FROM Vote x WHERE x.PostId=t.QuestionId AND x.CreationDate<t.CreationDate) v ON true"
+  },
+  {
+   "type": "derived_table",
+   "name": "topic_history",
+   "entity": "Id",
+   "max_rows_per_case": 5,
+   "fkeys": {
+    "TagId": "Tag"
+   },
+   "sql": "WITH current_tags AS (SELECT DISTINCT e.Id,e.CreationDate,p.OwnerUserId,pt.TagId FROM eval_table e JOIN Posts p ON p.Id=e.Id AND p.CreationDate<=e.CreationDate LEFT JOIN Posts q ON q.Id=p.ParentId AND q.CreationDate<e.CreationDate JOIN PostTag pt ON pt.PostId=coalesce(q.Id,p.Id)), history AS (SELECT ct.Id,ct.CreationDate,ct.OwnerUserId,ct.TagId,h.Id AS history_post_id,h.CreationDate AS history_created,h.OwnerUserId AS history_owner FROM current_tags ct LEFT JOIN PostTag ht ON ht.TagId=ct.TagId LEFT JOIN Posts h ON h.Id=ht.PostId AND h.PostTypeId=1 AND h.Id<>ct.Id AND h.CreationDate<ct.CreationDate), aggregated AS (SELECT h.Id,h.CreationDate,h.TagId,count(h.history_post_id) AS prior_tag_questions,count(h.history_post_id) FILTER (WHERE h.history_created>=h.CreationDate-INTERVAL '90 days') AS tag_questions_90d,count(h.history_post_id) FILTER (WHERE h.history_owner=h.OwnerUserId) AS author_prior_tag_questions,date_diff('second',max(h.history_created),h.CreationDate)/86400.0 AS days_since_tag_question,count(m.Target) AS tag_matured_cases,coalesce(sum(CAST(m.Target AS INTEGER)),0) AS tag_matured_positive_cases,(coalesce(sum(CAST(m.Target AS INTEGER)),0)+1.0)/(count(m.Target)+2.0) AS tag_matured_positive_rate FROM history h LEFT JOIN LATERAL (SELECT ml.Target FROM matured_labels ml WHERE ml.Id=h.history_post_id AND ml.Id<>h.Id AND ml.CreationDate<h.CreationDate AND ml.label_window_end<h.CreationDate ORDER BY ml.CreationDate DESC,ml.label_window_end DESC,ml.Target DESC LIMIT 1) m ON true GROUP BY h.Id,h.CreationDate,h.TagId) SELECT * FROM aggregated QUALIFY row_number() OVER (PARTITION BY Id,CreationDate ORDER BY prior_tag_questions DESC,TagId ASC)<=5"
+  }
+ ]
+}

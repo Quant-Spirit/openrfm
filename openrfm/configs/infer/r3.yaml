@@ -1,0 +1,40 @@
+# Recipe R3: the R2 cell of each task (openrfm/configs/infer/r2.yaml) plus a residual head on the frozen Kumo-Tabular
+# prediction, trained per task on its support rows (openrfm/infer/residual.py). `head` gives the learning rate, the
+# regression loss (`median`: pinball at the median), the maximum number of updates, the checkpoint steps evaluated on
+# the temporal holdout of the support set, the episode support and query sizes and the hidden width.
+default:
+  classification: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  regression: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+tasks:
+  amazon-4db/user-churn: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  outbrain-4db/ad-ctr: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-amazon/item-churn: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-amazon/item-ltv: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-amazon/user-churn: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-amazon/user-ltv: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-arxiv/author-publication: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-arxiv/paper-citation: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-avito/ad-ctr: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-avito/user-clicks: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-avito/user-visits: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-event/user-attendance: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-event/user-ignore: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-event/user-repeat: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-f1/driver-dnf: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-f1/driver-position: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-f1/driver-top3: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-hm/item-sales: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-hm/user-churn: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-ratebeer/beer-churn: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-ratebeer/brewer-dormant: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-ratebeer/user-churn: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-ratebeer/user-count: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-stack/post-votes: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-stack/user-badge: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-stack/user-engagement: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-trial/site-success: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-trial/study-adverse: {head: {lr: 0.0001, loss: median, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  rel-trial/study-outcome: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  retailrocket-4db/item-cvr: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  stackexchange-4db/post-upvote: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}
+  stackexchange-4db/user-churn: {head: {lr: 0.0001, loss: null, steps: 400, checkpoints: [5, 10, 25, 50, 100, 200, 400], support: 512, queries: 128, hidden: 256}}

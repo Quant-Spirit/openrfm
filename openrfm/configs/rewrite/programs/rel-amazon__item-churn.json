@@ -1,0 +1,36 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-amazon",
+ "task": "item-churn",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "product",
+   "columns": [
+    "category",
+    "price",
+    "brand"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "product__snapshot",
+   "entity": "product_id",
+   "blocks": [
+    {
+     "name": "activity_and_inactivity_tails",
+     "sql": "SELECT a.product_id, a.timestamp, a.n_reviews_total, a.n_reviews_7d, a.n_reviews_30d, a.n_reviews_91d, a.n_reviews_previous_91d, a.n_reviews_365d, a.n_reviews_year_ago_91d, a.days_since_first_review, a.days_since_last_review, a.active_review_days_91d, g.mean_last5_active_day_gaps, g.p90_completed_gap_days, COALESCE(g.n_completed_gaps, 0) AS n_completed_gaps, COALESCE(g.n_completed_gaps_longer_than_current, 0) AS n_completed_gaps_longer_than_current, COALESCE(g.n_completed_gaps_longer_than_current_plus_91d, 0) AS n_completed_gaps_longer_than_current_plus_91d FROM (SELECT e.product_id, e.timestamp, COUNT(r.review_time) AS n_reviews_total, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '7 days') AS n_reviews_7d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '30 days') AS n_reviews_30d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days') AS n_reviews_91d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '182 days' AND r.review_time < e.timestamp - INTERVAL '91 days') AS n_reviews_previous_91d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '365 days') AS n_reviews_365d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '456 days' AND r.review_time < e.timestamp - INTERVAL '365 days') AS n_reviews_year_ago_91d, DATE_DIFF('second', MIN(r.review_time), e.timestamp) / 86400.0 AS days_since_first_review, DATE_DIFF('second', MAX(r.review_time), e.timestamp) / 86400.0 AS days_since_last_review, COUNT(DISTINCT CAST(r.review_time AS DATE)) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days') AS active_review_days_91d FROM eval_table e LEFT JOIN review r ON r.product_id = e.product_id AND r.review_time < e.timestamp GROUP BY e.product_id, e.timestamp) a LEFT JOIN (SELECT h.product_id, h.timestamp, AVG(h.gap_days) FILTER (WHERE h.reverse_rank <= 5) AS mean_last5_active_day_gaps, QUANTILE_CONT(h.gap_days, 0.9) AS p90_completed_gap_days, COUNT(h.gap_days) AS n_completed_gaps, COUNT(h.gap_days) FILTER (WHERE h.gap_days > DATE_DIFF('second', h.last_review_time, h.timestamp) / 86400.0) AS n_completed_gaps_longer_than_current, COUNT(h.gap_days) FILTER (WHERE h.gap_days > DATE_DIFF('second', h.last_review_time, h.timestamp) / 86400.0 + 91.0) AS n_completed_gaps_longer_than_current_plus_91d FROM (SELECT d.product_id, d.timestamp, DATE_DIFF('day', LAG(d.review_day) OVER (PARTITION BY d.product_id, d.timestamp ORDER BY d.review_day), d.review_day) AS gap_days, ROW_NUMBER() OVER (PARTITION BY d.product_id, d.timestamp ORDER BY d.review_day DESC) AS reverse_rank, MAX(d.day_last_time) OVER (PARTITION BY d.product_id, d.timestamp) AS last_review_time FROM (SELECT e.product_id, e.timestamp, CAST(r.review_time AS DATE) AS review_day, MAX(r.review_time) AS day_last_time FROM eval_table e JOIN review r ON r.product_id = e.product_id AND r.review_time < e.timestamp GROUP BY e.product_id, e.timestamp, CAST(r.review_time AS DATE)) d) h GROUP BY h.product_id, h.timestamp) g ON g.product_id = a.product_id AND g.timestamp = a.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "product_recent_review_days",
+   "entity": "product_id",
+   "sql": "SELECT h.product_id, h.timestamp, h.review_day, h.reviews_on_day, h.preceding_inactive_gap_days, h.mean_rating, h.verified_fraction FROM (SELECT d.product_id, d.timestamp, d.review_day, d.reviews_on_day, d.mean_rating, d.verified_fraction, DATE_DIFF('day', LAG(d.review_day) OVER (PARTITION BY d.product_id, d.timestamp ORDER BY d.review_day), d.review_day) AS preceding_inactive_gap_days, ROW_NUMBER() OVER (PARTITION BY d.product_id, d.timestamp ORDER BY d.review_day DESC) AS recency_rank FROM (SELECT e.product_id, e.timestamp, CAST(r.review_time AS DATE) AS review_day, COUNT(*) AS reviews_on_day, AVG(r.rating) AS mean_rating, AVG(CAST(r.verified AS DOUBLE)) AS verified_fraction FROM eval_table e JOIN review r ON r.product_id = e.product_id AND r.review_time < e.timestamp GROUP BY e.product_id, e.timestamp, CAST(r.review_time AS DATE)) d) h WHERE h.recency_rank <= 4",
+   "max_rows_per_case": 4,
+   "fkeys": {}
+  }
+ ]
+}

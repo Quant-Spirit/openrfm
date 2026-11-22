@@ -1,0 +1,39 @@
+# Recipe R2: the R1 columns at taps 3 and 6 plus the record bank of the slot row (and of its latest lawful snapshot
+# child when `records: snapshot`), constant columns dropped. `schema: program` reads openrfm/configs/rewrite/programs/<task>.json.
+# `default` is the cell of a task declared with `openrfm predict --spec`.
+default:
+  classification: {task_type: classification, schema: plain, L: 1024, K: 4096, E: 4, selection: random, transform: null, support: standard, records: slot, bank_width: 4}
+  regression: {task_type: regression, schema: plain, L: 1024, K: 4096, E: 4, selection: random, transform: identity, support: standard, records: slot, bank_width: 4}
+tasks:
+  amazon-4db/user-churn: {task_type: classification, schema: program, L: 1024, K: 4096, E: 2, selection: random, transform: null, support: standard, records: snapshot, bank_width: 4}
+  outbrain-4db/ad-ctr: {task_type: classification, schema: program, L: 1024, K: 8192, E: 4, selection: random, transform: null, support: standard, records: snapshot, bank_width: 4}
+  rel-amazon/item-churn: {task_type: classification, schema: program, L: 1024, K: 16384, E: 8, selection: nested, transform: null, support: standard, records: snapshot, bank_width: 4}
+  rel-amazon/item-ltv: {task_type: regression, schema: program, L: 1024, K: 8192, E: 4, selection: random, transform: identity, support: standard, records: snapshot, bank_width: 4}
+  rel-amazon/user-churn: {task_type: classification, schema: program, L: 1024, K: 8192, E: 1, selection: random, transform: null, support: standard, records: snapshot, bank_width: 2}
+  rel-amazon/user-ltv: {task_type: regression, schema: program, L: 1024, K: 16384, E: 4, selection: random, transform: sqrt, support: standard, records: snapshot, bank_width: 4}
+  rel-arxiv/author-publication: {task_type: regression, schema: plain, L: 1024, K: 2048, E: 4, selection: random, transform: log1p, support: standard, records: slot, bank_width: 4}
+  rel-arxiv/paper-citation: {task_type: classification, schema: program, L: 1024, K: 16384, E: 2, selection: nested, transform: null, support: standard, records: snapshot, bank_width: 4}
+  rel-avito/ad-ctr: {task_type: regression, schema: plain, L: 1024, K: 2048, E: 4, selection: random, transform: log1p, support: standard, records: slot, bank_width: 4}
+  rel-avito/user-clicks: {task_type: classification, schema: program, L: 1024, K: 8192, E: 1, selection: nested, transform: null, support: standard, records: snapshot, bank_width: 2}
+  rel-avito/user-visits: {task_type: classification, schema: program, L: 1024, K: 4096, E: 8, selection: random, transform: null, support: standard, records: snapshot, bank_width: 4}
+  rel-event/user-attendance: {task_type: regression, schema: program, L: 1024, K: 2048, E: 2, selection: random, transform: identity, support: standard, records: snapshot, bank_width: 4}
+  rel-event/user-ignore: {task_type: classification, schema: program, L: 1024, K: 512, E: 2, selection: random, transform: null, support: standard, records: snapshot, bank_width: 2}
+  rel-event/user-repeat: {task_type: classification, schema: program, L: 1024, K: 4096, E: 1, selection: random, transform: null, support: standard, records: snapshot, bank_width: 2}
+  rel-f1/driver-dnf: {task_type: classification, schema: program, L: 1024, K: 2048, E: 1, selection: random, transform: null, support: standard, records: snapshot, bank_width: 1}
+  rel-f1/driver-position: {task_type: regression, schema: plain, L: 1024, K: 512, E: 4, selection: random, transform: identity, support: standard, records: slot, bank_width: 4}
+  rel-f1/driver-top3: {task_type: classification, schema: program, L: 1024, K: 512, E: 2, selection: random, transform: null, support: standard, records: snapshot, bank_width: 2}
+  rel-hm/item-sales: {task_type: regression, schema: plain, L: 1024, K: 8192, E: 8, selection: random, transform: log1p, support: standard, records: slot, bank_width: 2}
+  rel-hm/user-churn: {task_type: classification, schema: plain, L: 1024, K: 16384, E: 4, selection: nested, transform: null, support: standard, records: slot, bank_width: 4}
+  rel-ratebeer/beer-churn: {task_type: classification, schema: plain, L: 4096, K: 512, E: 2, selection: random, transform: null, support: standard, records: slot, bank_width: 0}
+  rel-ratebeer/brewer-dormant: {task_type: classification, schema: program, L: 1024, K: 8192, E: 2, selection: random, transform: null, support: standard, records: snapshot, bank_width: 2}
+  rel-ratebeer/user-churn: {task_type: classification, schema: program, L: 1024, K: 2048, E: 4, selection: nested, transform: null, support: standard, records: snapshot, bank_width: 4}
+  rel-ratebeer/user-count: {task_type: regression, schema: program, L: 1024, K: 16384, E: 1, selection: random, transform: sqrt, support: standard, records: snapshot, bank_width: 4}
+  rel-stack/post-votes: {task_type: regression, schema: plain, L: 1024, K: 8192, E: 2, selection: random, transform: sqrt, support: standard, records: slot, bank_width: 4}
+  rel-stack/user-badge: {task_type: classification, schema: plain, L: 1024, K: 4096, E: 2, selection: random, transform: null, support: standard, records: slot, bank_width: 4}
+  rel-stack/user-engagement: {task_type: classification, schema: program, L: 1024, K: 8192, E: 4, selection: random, transform: null, support: standard, records: snapshot, bank_width: 4}
+  rel-trial/site-success: {task_type: regression, schema: program, L: 1024, K: 512, E: 4, selection: random, transform: identity, support: standard, records: snapshot, bank_width: 2}
+  rel-trial/study-adverse: {task_type: regression, schema: plain, L: 1024, K: 16384, E: 2, selection: random, transform: log1p, support: standard, records: slot, bank_width: 2}
+  rel-trial/study-outcome: {task_type: classification, schema: program, L: 1024, K: 8192, E: 2, selection: random, transform: null, support: standard, records: snapshot, bank_width: 2}
+  retailrocket-4db/item-cvr: {task_type: classification, schema: program, L: 1024, K: 4096, E: 1, selection: random, transform: null, support: standard, records: snapshot, bank_width: 4}
+  stackexchange-4db/post-upvote: {task_type: classification, schema: program, L: 1024, K: 2048, E: 2, selection: random, transform: null, support: standard, records: snapshot, bank_width: 2}
+  stackexchange-4db/user-churn: {task_type: classification, schema: program, L: 1024, K: 4096, E: 2, selection: random, transform: null, support: standard, records: snapshot, bank_width: 4}

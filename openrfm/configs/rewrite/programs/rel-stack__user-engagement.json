@@ -1,0 +1,52 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-stack",
+ "task": "user-engagement",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "users",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "users__snapshot",
+   "entity": "OwnerUserId",
+   "blocks": [
+    {
+     "name": "user_age",
+     "sql": "SELECT e.OwnerUserId,e.timestamp,(epoch(e.timestamp)-epoch(u.CreationDate))/86400.0 AS user_age_days FROM (SELECT DISTINCT OwnerUserId,timestamp FROM eval_table) e LEFT JOIN users u ON u.Id=e.OwnerUserId AND u.CreationDate<=e.timestamp"
+    },
+    {
+     "name": "posting_persistence",
+     "sql": "SELECT e.OwnerUserId,e.timestamp,COUNT(p.Id) AS posts_all,COUNT(p.Id) FILTER (WHERE p.CreationDate>=e.timestamp-INTERVAL '7 days') AS posts_7d,COUNT(p.Id) FILTER (WHERE p.CreationDate>=e.timestamp-INTERVAL '30 days') AS posts_30d,COUNT(p.Id) FILTER (WHERE p.CreationDate>=e.timestamp-INTERVAL '91 days') AS posts_91d,COUNT(p.Id) FILTER (WHERE p.CreationDate>=e.timestamp-INTERVAL '365 days') AS posts_365d,(epoch(e.timestamp)-epoch(MAX(p.CreationDate)))/86400.0 AS days_since_post FROM (SELECT DISTINCT OwnerUserId,timestamp FROM eval_table) e LEFT JOIN posts p ON p.OwnerUserId=e.OwnerUserId AND p.CreationDate<e.timestamp GROUP BY e.OwnerUserId,e.timestamp"
+    },
+    {
+     "name": "comment_activity",
+     "sql": "SELECT e.OwnerUserId,e.timestamp,COUNT(c.Id) FILTER (WHERE c.CreationDate>=e.timestamp-INTERVAL '30 days') AS comments_30d,(epoch(e.timestamp)-epoch(MAX(c.CreationDate)))/86400.0 AS days_since_comment FROM (SELECT DISTINCT OwnerUserId,timestamp FROM eval_table) e LEFT JOIN comments c ON c.UserId=e.OwnerUserId AND c.CreationDate<e.timestamp GROUP BY e.OwnerUserId,e.timestamp"
+    },
+    {
+     "name": "vote_activity",
+     "sql": "SELECT e.OwnerUserId,e.timestamp,COUNT(v.Id) FILTER (WHERE v.CreationDate>=e.timestamp-INTERVAL '30 days') AS votes_30d,(epoch(e.timestamp)-epoch(MAX(v.CreationDate)))/86400.0 AS days_since_vote FROM (SELECT DISTINCT OwnerUserId,timestamp FROM eval_table) e LEFT JOIN votes v ON v.UserId=e.OwnerUserId AND v.CreationDate<e.timestamp GROUP BY e.OwnerUserId,e.timestamp"
+    },
+    {
+     "name": "badge_activity",
+     "sql": "SELECT e.OwnerUserId,e.timestamp,COUNT(b.Id) FILTER (WHERE b.Date>=e.timestamp-INTERVAL '91 days') AS badges_91d,(epoch(e.timestamp)-epoch(MAX(b.Date)))/86400.0 AS days_since_badge FROM (SELECT DISTINCT OwnerUserId,timestamp FROM eval_table) e LEFT JOIN badges b ON b.UserId=e.OwnerUserId AND b.Date<e.timestamp GROUP BY e.OwnerUserId,e.timestamp"
+    },
+    {
+     "name": "revision_activity",
+     "sql": "SELECT e.OwnerUserId,e.timestamp,COUNT(ph.Id) AS revisions_30d FROM (SELECT DISTINCT OwnerUserId,timestamp FROM eval_table) e LEFT JOIN postHistory ph ON ph.UserId=e.OwnerUserId AND ph.CreationDate<e.timestamp AND ph.CreationDate>=e.timestamp-INTERVAL '30 days' GROUP BY e.OwnerUserId,e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "user_recent_post_episodes",
+   "entity": "OwnerUserId",
+   "sql": "WITH e AS (SELECT DISTINCT OwnerUserId,timestamp FROM eval_table), history AS (SELECT e.OwnerUserId,e.timestamp,p.Id AS PostId,p.PostTypeId,p.CreationDate,LAG(p.CreationDate) OVER (PARTITION BY e.OwnerUserId,e.timestamp ORDER BY p.CreationDate,p.Id) AS previous_post_time FROM e JOIN posts p ON p.OwnerUserId=e.OwnerUserId AND p.CreationDate<e.timestamp), recent AS (SELECT * FROM history QUALIFY ROW_NUMBER() OVER (PARTITION BY OwnerUserId,timestamp ORDER BY CreationDate DESC,PostId DESC)<=3) SELECT r.OwnerUserId,r.timestamp,r.PostTypeId AS post_type,(epoch(r.timestamp)-epoch(r.CreationDate))/86400.0 AS post_age_days,(epoch(r.CreationDate)-epoch(r.previous_post_time))/86400.0 AS preceding_post_gap_days,(SELECT COUNT(*) FROM comments c WHERE c.PostId=r.PostId AND c.UserId<>r.OwnerUserId AND c.CreationDate>=r.CreationDate AND c.CreationDate<r.timestamp) AS comments_received,(SELECT COUNT(DISTINCT c.UserId) FROM comments c WHERE c.PostId=r.PostId AND c.UserId<>r.OwnerUserId AND c.CreationDate>=r.CreationDate AND c.CreationDate<r.timestamp) AS distinct_commenters,(SELECT COUNT(*) FROM votes v WHERE v.PostId=r.PostId AND v.VoteTypeId=2 AND v.CreationDate>=r.CreationDate AND v.CreationDate<r.timestamp) AS upvotes_received,(SELECT COUNT(*) FROM votes v WHERE v.PostId=r.PostId AND v.VoteTypeId=3 AND v.CreationDate>=r.CreationDate AND v.CreationDate<r.timestamp) AS downvotes_received FROM recent r",
+   "max_rows_per_case": 3,
+   "fkeys": {}
+  }
+ ]
+}

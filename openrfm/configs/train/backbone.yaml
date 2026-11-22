@@ -1,0 +1,213 @@
+# Backbone pretraining recipe of the released OpenRFM backbone (exported at step 40000).
+#   openrfm generate --config openrfm/configs/data/backbone_corpus.yaml --out GEN ...
+#   openrfm train backbone corpus --config openrfm/configs/train/backbone.yaml --generated GEN --out CORPUS
+#   openrfm train backbone train --config openrfm/configs/train/backbone.yaml --corpus CORPUS --out RUN
+#   openrfm train backbone export --checkpoint RUN/steps=40000.pt --out openrfm_backbone.pt
+# CORPUS holds sources/ (one v2 archive per world, with fp32 datetimes), corpus/ (aliased links and
+# compact_task_catalog.json) and consumers/ (the frozen TabICL v2 models).
+seed: 0
+optimizer_steps: 50000
+batch_size: 32
+grad_accum_steps: 8
+# Cells per micro-batch = context_length x batch_size; each micro-batch draws its length from length_mix.
+context_length: 1024
+length_mix: {256: 0.25, 1024: 0.5, 4096: 0.25}
+checkpoint_every: 2000
+# links to the archives and the task catalog, under --corpus (written by `train backbone corpus`)
+archives: corpus
+# task views (world x policy x length) kept on the device; a dropped view is reloaded identically on its next use
+resident_views: 4096
+
+optimizer:
+  muon_lr: 0.0005
+  aux_lr: 0.0003
+  weight_decay: 0.1
+  momentum: 0.95
+  nesterov: true
+  ns_steps: 5
+  aux_betas: [0.9, 0.95]
+  aux_eps: 1.0e-8
+  max_grad_norm: 1.0
+  warmup_steps: 300
+  decay_start_step: 30000
+  min_lr_ratio: 0.1
+
+objective:
+  multi_cell_mask_p_max: 0.25
+  support_fraction: 0.25
+  column_slot_weight: 0.25
+  column_slot_slots: 16
+
+coupling:
+  every: 4
+  weight: 0.5
+  ramp_steps: 300
+  query_fraction: 0.25
+  q_min: 4
+  handoff_slots: 96
+  taps: [1, 2, 3, 4]
+  k: 4
+  row_depth: 6
+  episodes:
+    seed: 0
+    query_cohort: 64
+    encoding_chunk_cells: 32768
+    length_mix: {256: 0.6, 1024: 0.4}
+    support_mix_by_length:
+      256: {32: 0.16666666666666666, 128: 0.16666666666666666, 512: 0.16666666666666666, 1024: 0.16666666666666666, 2048: 0.16666666666666666, 4096: 0.16666666666666666}
+      1024: {32: 0.25, 128: 0.25, 512: 0.25, 1024: 0.25}
+    task_type_mix: {autocomplete: 0.15, forecast_or_other: 0.85}
+  consumers:
+    classifier: {file: consumers/classifier.ckpt, repo: jingang/TabICL, source: tabicl-classifier-v2-20260212.ckpt,
+                 sha256: bdc7dbd5e4ff21f8f0456fcf90c6b7cdf72dbea960f2d05b19bec19f9b3d4ed0}
+    regressor: {file: consumers/regressor.ckpt, repo: jingang/TabICL, source: tabicl-regressor-v2-20260212.ckpt,
+                sha256: 0db9cb538f114e79026bf08f45f41ad8dd7ad2de2aaca9a5ca8cd3bd9748ae7a}
+
+# mixture groups, one per generated family, in this order: [family, weight]; consecutive batches of one group
+# draw from the systematic schedule over windows of group_window batches. A family without worlds in the corpus
+# is left out and the remaining weights are renormalised.
+group_window: 1600
+families:
+  - [NEW.auto.category, 0.039200000000000006]
+  - [NEW.auto.mark, 0.0336]
+  - [NEW.auto.numeric, 0.039200000000000006]
+  - [NEW.derived, 0.16000000000000003]
+  - [NEW.future.count, 0.033600000000000005]
+  - [NEW.future.count_gt, 0.039200000000000006]
+  - [NEW.future.exists, 0.039200000000000006]
+  - [NEW.future.max, 0.0112]
+  - [NEW.future.mean, 0.0112]
+  - [NEW.future.next_category, 0.0112]
+  - [NEW.future.sum, 0.0224]
+  - [NEW.future.time_to_next, 0.0168]
+  - [OLD.A4.any_event, 0.00168]
+  - [OLD.A4.churn, 0.00168]
+  - [OLD.A4.count, 0.00168]
+  - [OLD.A4.multiclass, 0.00168]
+  - [OLD.A4.zero_inflated_sum, 0.00168]
+  - [OLD.PH.drift, 0.013250000000000001]
+  - [OLD.PH.meanrev, 0.00795]
+  - [OLD.PH.nohist, 0.00795]
+  - [OLD.PH.regime, 0.0212]
+  - [OLD.PH.seasonal, 0.00795]
+  - [OLD.PH.window, 0.026500000000000003]
+  - [OLD.SQL.own.distinct, 0.0011200000000000001]
+  - [OLD.SQL.own.next_bucket, 0.0005600000000000001]
+  - [OLD.SQL.own.same_category, 0.0011200000000000001]
+  - [OLD.SQL.peer.count, 0.0011200000000000001]
+  - [OLD.SQL.peer.count_gt_k, 0.0011200000000000001]
+  - [OLD.SQL.peer.distinct, 0.0014]
+  - [OLD.SQL.peer.exists, 0.0011200000000000001]
+  - [OLD.SQL.peer.mean, 0.0005600000000000001]
+  - [OLD.SQL.peer.next_bucket, 0.0011200000000000001]
+  - [OLD.SQL.peer.same_category, 0.0014]
+  - [OLD.SQL.peer.sum, 0.0005600000000000001]
+  - [OLD.frank.q16, 0.0028]
+  - [OLD.frank.q4, 0.0028]
+  - [OLD.tabular.operator, 0.0252]
+  - [OLD.tabular.support, 0.0336]
+  - [OLD.tabular.tabicl, 0.0336]
+  - [OLD.long.any_event, 0.0022400000000000002]
+  - [OLD.long.churn, 0.0022400000000000002]
+  - [OLD.long.count, 0.0022400000000000002]
+  - [OLD.long.multiclass, 0.0022400000000000002]
+  - [OLD.long.zero_inflated_sum, 0.0022400000000000002]
+  - [OLD.nuisance.bagcbeta, 0.0020125]
+  - [OLD.nuisance.bagcnorm, 0.0020125]
+  - [OLD.nuisance.bagcpois, 0.0020125]
+  - [OLD.nuisance.bagnsexc, 0.0020125]
+  - [OLD.nuisance.bagnsmax, 0.0020125]
+  - [OLD.nuisance.bagnsq90, 0.004025]
+  - [OLD.nuisance.feat, 0.004025]
+  - [OLD.nuisance.hazgap, 0.0136125]
+  - [OLD.nuisance.haznext, 0.0136125]
+  - [OLD.nuisance.mident, 0.004025]
+  - [OLD.nuisance.plookup, 0.0020125]
+  - [OLD.nuisance.plookup2, 0.004025]
+  - [OLD.nuisance.plookuprec, 0.004025]
+  - [OLD.nuisance.qsel, 0.00805]
+  - [OLD.nuisance.routecnt, 0.0020125]
+  - [OLD.nuisance.routemean, 0.004025]
+  - [OLD.nuisance.routeqg, 0.0060374999999999995]
+  - [OLD.nuisance.tempk, 0.004025]
+  - [OLD.nuisance.tempkcpl, 0.004025]
+  - [OLD.rank.q16, 0.0042]
+  - [OLD.rank.q4, 0.00168]
+  - [OLD.rank.q8, 0.0025199999999999997]
+  - [OLD.v6_own_history, 0.0336]
+  - [NEW.fact1.binary, 0.030753968253968252]
+  - [NEW.fact1.regression, 0.019246031746031747]
+  - [NEW.fact2.binary, 0.029365079365079365]
+  - [NEW.fact2.regression, 0.020634920634920634]
+  - [NEW.slate.choice, 0.028174603174603175]
+  - [NEW.slate.contrast, 0.021825396825396824]
+  - [NEW.window.burst.binary, 0.0030092592592592593]
+  - [NEW.window.burst.regression, 0.0020833333333333333]
+  - [NEW.window.count.binary, 0.0025462962962962965]
+  - [NEW.window.count.regression, 0.0016203703703703705]
+  - [NEW.window.rate_change.binary, 0.003472222222222222]
+  - [NEW.window.rate_change.regression, 0.0025462962962962965]
+  - [NEW.window.recency.binary, 0.0002314814814814815]
+  - [NEW.window.recency.regression, 0.0020833333333333333]
+  - [NEW.window.type_ratio.binary, 0.0025462962962962965]
+  - [NEW.window.type_ratio.regression, 0.0025462962962962965]
+  - [NEW.window.typed_count.binary, 0.0027777777777777783]
+  - [NEW.window.typed_count.regression, 0.0020833333333333333]
+  - [NEW.window.typed_max.binary, 0.003703703703703704]
+  - [NEW.window.typed_max.regression, 0.0020833333333333333]
+  - [NEW.window.typed_mean.binary, 0.0016203703703703705]
+  - [NEW.window.typed_mean.regression, 0.0020833333333333333]
+  - [NEW.window.typed_sum.binary, 0.0025462962962962965]
+  - [NEW.window.typed_sum.regression, 0.0030092592592592593]
+  - [NEW.window.value_sum.binary, 0.004166666666666667]
+  - [NEW.window.value_sum.regression, 0.003240740740740741]
+
+# context composition of the sampler (openrfm.sampler.RTRetrievalSpec)
+sampler:
+  version: 3
+  archive_cell_order: table_row_col
+  composition_algorithm: path_stream_v1
+  discovery_scales_with_length: true
+  stream_weight_policy: selectivity
+  extension_policy: typed_temporal_mix
+  protected_core_len: 1024
+  rw_extension_percent: 25
+  extension_time_unit_seconds: 86400
+  seed_block_policy: truncate_priority
+  walk_count: 32
+  walk_steps: 16
+  candidate_count: 256
+  seq_len_set: [1024]
+  local_cell_budget_set: [1024]
+  bfs_width_set: [16, 32, 64, 128]
+  recency_set: [0, 1]
+  label_visibility: strict_drop
+  label_horizon_seconds: null
+  support_contract: existing_donor_mask
+  traversal: two_stage
+  max_hops: 0
+  peer_labels_per_1024: 32
+  seed_hops: 6
+  path_depth: 6
+  time_strata: 8
+  filler_percent: 0
+  support_label_horizon_safe: true
+
+# context programs drawn per request (openrfm.train.backbone.context)
+context_prior:
+  version: 4
+  kind: context_prior
+  identity: false
+  choices:
+    link: [native, direct]
+    bridge: [cells, empty]
+    column_percent: [100, 75, 50]
+    table_percent: [100, 75]
+    order: [own_first, mixed, parent_first]
+    peers: [absent, random, near, far]
+    own_labels: [0, 8, 32, 128]
+    own_events: [16, 64, 256]
+    peer_labels: [8, 32, 128]
+    core: [64, 256, 1024]
+    summary: [materialized, raw]
+    pack: [default, overlay]

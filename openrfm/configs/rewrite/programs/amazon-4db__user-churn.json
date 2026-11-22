@@ -1,0 +1,44 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "amazon-4db",
+ "task": "user-churn",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "Customer",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "Customer__snapshot",
+   "entity": "customer_id",
+   "blocks": [
+    {
+     "name": "compact_activity",
+     "sql": "SELECT e.customer_id, e.timestamp, COUNT(r.review_time) AS lifetime_reviews, COUNT(DISTINCT r.product_id) AS lifetime_products, DATE_DIFF('second', MAX(r.review_time), e.timestamp)/86400.0 AS days_since_last_review, DATE_DIFF('second', MIN(r.review_time), e.timestamp)/86400.0 AS history_days, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '7 days') AS reviews_7d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '30 days') AS reviews_30d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '60 days' AND r.review_time < e.timestamp - INTERVAL '30 days') AS reviews_30_to_60d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '90 days' AND r.review_time < e.timestamp - INTERVAL '60 days') AS reviews_60_to_90d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '180 days') AS reviews_180d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '365 days') AS reviews_365d, COUNT(DISTINCT CAST(r.review_time AS DATE)) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '90 days') AS active_days_90d, AVG(r.rating) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '90 days') AS mean_rating_90d FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp GROUP BY e.customer_id, e.timestamp"
+    },
+    {
+     "name": "active_day_cadence",
+     "sql": "WITH daily AS (SELECT e.customer_id, e.timestamp, CAST(r.review_time AS DATE) AS activity_date, MIN(r.review_time) AS first_review_time, MAX(r.review_time) AS last_review_time FROM eval_table e JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp GROUP BY e.customer_id, e.timestamp, CAST(r.review_time AS DATE)), sequenced AS (SELECT *, DATE_DIFF('second', LAG(last_review_time) OVER (PARTITION BY customer_id, timestamp ORDER BY activity_date), first_review_time)/86400.0 AS gap_days, ROW_NUMBER() OVER (PARTITION BY customer_id, timestamp ORDER BY activity_date DESC) AS recency_order FROM daily) SELECT customer_id, timestamp, COUNT(*) AS lifetime_active_days, MEDIAN(gap_days) AS median_active_day_gap, AVG(gap_days) AS mean_active_day_gap, MAX(CASE WHEN recency_order=1 THEN gap_days END) AS latest_active_day_gap, (DATE_DIFF('second', MAX(last_review_time), timestamp)/86400.0)/NULLIF(MEDIAN(gap_days), 0) AS inactivity_over_median_gap FROM sequenced GROUP BY customer_id, timestamp"
+    },
+    {
+     "name": "matured_personal_outcomes",
+     "sql": "WITH history AS (SELECT e.customer_id, e.timestamp, m.timestamp AS prior_timestamp, m.churn, ROW_NUMBER() OVER (PARTITION BY e.customer_id, e.timestamp ORDER BY m.timestamp DESC, m.label_window_end DESC, m.churn DESC) AS recency_order FROM eval_table e LEFT JOIN matured_labels m ON m.customer_id=e.customer_id AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp) SELECT customer_id, timestamp, COUNT(prior_timestamp) AS matured_episode_count, AVG(CAST(churn AS DOUBLE)) AS historical_churn_fraction, MAX(CASE WHEN recency_order=1 THEN churn END) AS latest_matured_churn FROM history GROUP BY customer_id, timestamp"
+    },
+    {
+     "name": "annual_activity",
+     "sql": "SELECT e.customer_id, e.timestamp, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '365 days' AND r.review_time < e.timestamp - INTERVAL '275 days') AS reviews_matching_next_season_last_year, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '455 days' AND r.review_time < e.timestamp - INTERVAL '365 days') AS reviews_matching_recent_season_last_year FROM eval_table e LEFT JOIN Review r ON r.customer_id=e.customer_id AND r.review_time < e.timestamp GROUP BY e.customer_id, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "customer_monthly_activity",
+   "entity": "customer_id",
+   "sql": "WITH periods AS (SELECT e.customer_id, e.timestamp, e.timestamp - (p.i + 1) * INTERVAL '30 days' AS period_start, e.timestamp - p.i * INTERVAL '30 days' AS period_end FROM eval_table e CROSS JOIN range(12) AS p(i)) SELECT p.customer_id, p.timestamp, p.period_start, p.period_end, COUNT(r.review_time) AS review_count, COUNT(DISTINCT CAST(r.review_time AS DATE)) AS active_day_count, COUNT(DISTINCT r.product_id) AS product_count, AVG(r.rating) AS mean_rating FROM periods p LEFT JOIN Review r ON r.customer_id=p.customer_id AND r.review_time < p.timestamp AND r.review_time >= p.period_start AND r.review_time < p.period_end GROUP BY p.customer_id, p.timestamp, p.period_start, p.period_end",
+   "max_rows_per_case": 12,
+   "fkeys": {}
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+# A task of the simulated shop database (make_shop.py); the keys follow openrfm/configs/infer/tasks.yaml.
+db: shop
+table: customer-churn
+target: churn
+task_type: classification
+entity_table: customers
+horizon_s: 2592000

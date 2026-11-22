@@ -1,0 +1,38 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-amazon",
+ "task": "user-ltv",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "customer",
+   "columns": [
+    "customer_name"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "customer__snapshot",
+   "entity": "customer_id",
+   "blocks": [
+    {
+     "name": "customer_activity_and_spending",
+     "sql": "SELECT e.customer_id, e.timestamp, COUNT(r.review_time) AS reviews_all, COALESCE(SUM(p.price), 0.0) AS spending_all, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '30 days') AS reviews_30d, COALESCE(SUM(p.price) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '30 days'), 0.0) AS spending_30d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days') AS reviews_91d, COALESCE(SUM(p.price) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days'), 0.0) AS spending_91d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '365 days') AS reviews_365d, COALESCE(SUM(p.price) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '365 days'), 0.0) AS spending_365d, DATE_DIFF('day', MAX(r.review_time), e.timestamp) AS days_since_last_review, DATE_DIFF('day', MIN(r.review_time), e.timestamp) AS days_since_first_review, (EPOCH(MAX(r.review_time)) - EPOCH(MIN(r.review_time))) / 86400.0 / NULLIF(COUNT(r.review_time) - 1, 0) AS mean_gap_days FROM eval_table e LEFT JOIN review r ON r.customer_id = e.customer_id AND r.review_time < e.timestamp LEFT JOIN product p ON p.product_id = r.product_id GROUP BY e.customer_id, e.timestamp"
+    },
+    {
+     "name": "customer_matured_outcomes",
+     "sql": "SELECT e.customer_id, e.timestamp, ARG_MAX(m.ltv, m.timestamp) AS last_matured_ltv, AVG(m.ltv) AS mean_matured_ltv, COUNT(m.label_window_end) AS matured_label_count FROM eval_table e LEFT JOIN matured_labels m ON m.customer_id = e.customer_id AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp GROUP BY e.customer_id, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "customer_spending_periods",
+   "entity": "customer_id",
+   "sql": "WITH periods(end_age_days, start_age_days) AS (VALUES (0, 91), (91, 182), (182, 273), (273, 365)) SELECT e.customer_id, e.timestamp, w.end_age_days AS period_end_age_days, COUNT(r.review_time) AS review_count, COALESCE(SUM(p.price), 0.0) AS spending, AVG(p.price) AS mean_product_price, COUNT(DISTINCT CAST(r.review_time AS DATE)) AS active_review_days FROM eval_table e CROSS JOIN periods w JOIN review r ON r.customer_id = e.customer_id AND r.review_time < e.timestamp AND r.review_time >= e.timestamp - w.start_age_days * INTERVAL '1 day' AND r.review_time < e.timestamp - w.end_age_days * INTERVAL '1 day' LEFT JOIN product p ON p.product_id = r.product_id GROUP BY e.customer_id, e.timestamp, w.end_age_days",
+   "max_rows_per_case": 4,
+   "fkeys": {}
+  }
+ ]
+}

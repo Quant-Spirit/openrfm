@@ -1,0 +1,39 @@
+# Memory-module training worlds (generated online by openrfm.synth.worlds.memory.write_world, one per 40 updates).
+# mix: starting shares of the world groups; training reallocates them by measured reducible loss.
+schema: memory_worlds_v1
+mix: {memory_signal: 0.09090909090909091, near_signal: 0.09090909090909091, joint_signal: 0.09090909090909091, real_shape: 0.09090909090909091, corpus_replay: 0.09090909090909091, exact_signal: 0.09090909090909091, hawkes_signal: 0.09090909090909091, regime_signal: 0.09090909090909091, censored_signal: 0.09090909090909091, silent_signal: 0.09090909090909091, tail_signal: 0.09090909090909091}
+generator:
+  stream: true
+  entities: 256
+  median_rows_per_key: [2, 25]
+  rows_per_key_sigma: [1.0, 1.7]
+  rows_per_key: [1, 200]
+  long_share: 0.25
+  long_median_rows_per_key: [60, 250]
+  long_rows_per_key: [1, 1500]
+  long_hub_zipf: [0.0, 0.8]
+  collab_noise: [0.1, 0.7]
+  hub_zipf: [0.0, 1.2]
+  value_columns: [1, 4]
+  history_days: [90, 730]
+  label_history_rows: [4, 6]
+  cutoff_span_fraction: [0.2, 0.8]
+  future_label_share: 0.5
+  horizon_days: [1, 7, 30]
+  task_types: [classification, regression]
+  distractor_value_columns: [3, 12]
+  exact_k_max: 32
+  hawkes_branching: [0.5, 0.9]
+  hawkes_delay_days: [1, 30]
+  hawkes_cross_share: [0.5, 0.9]
+  hawkes_group_size: [4, 32]
+  hawkes_max_rows: 200000
+  regime_change_fraction: [0.2, 0.7]
+  censor_entry_fraction: [0.5, 1.0]
+  censor_min_task_rows: 300
+  tail_sigma: [0.5, 2.5]
+  tail_atom_share: 0.4
+delivery:
+  max_rows_per_key: [1, 1500]
+  hub_share: [0.0, 1.0]
+  complete_evidence_fraction: 0.95

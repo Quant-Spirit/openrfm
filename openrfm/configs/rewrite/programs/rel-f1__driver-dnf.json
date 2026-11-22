@@ -1,0 +1,50 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-f1",
+ "task": "driver-dnf",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "drivers",
+   "columns": [
+    "nationality"
+   ],
+   "rows": "linked"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "drivers__snapshot",
+   "entity": "driverId",
+   "blocks": [
+    {
+     "name": "driver_age",
+     "sql": "SELECT e.driverId, e.date, date_diff('day', d.dob, e.date) / 365.2425 AS driver_age_years FROM eval_table e JOIN drivers d ON d.driverId = e.driverId"
+    },
+    {
+     "name": "own_race_history",
+     "sql": "WITH ranked AS (SELECT e.driverId AS entity_id, e.date AS cutoff, r.*, row_number() OVER (PARTITION BY e.driverId, e.date ORDER BY r.date DESC, r.raceId DESC) AS race_rank FROM eval_table e JOIN results r ON r.driverId = e.driverId AND r.date < e.date), summary AS (SELECT r.entity_id, r.cutoff, count(*) AS races_all, date_diff('day', max(r.date), r.cutoff) AS race_recency_days, max(CASE WHEN r.race_rank = 1 THEN r.constructorId END) AS current_constructor_id, avg(CAST(r.position IS NULL AS DOUBLE)) FILTER (WHERE r.race_rank <= 3) AS dnf_rate_3r, avg(CAST(r.statusId = 1 AS DOUBLE)) FILTER (WHERE r.race_rank <= 3) AS finish_rate_3r, avg(r.position) FILTER (WHERE r.race_rank <= 3 AND r.position IS NOT NULL) AS mean_position_3r, avg(r.grid) FILTER (WHERE r.race_rank <= 3) AS mean_grid_3r, avg(r.points) FILTER (WHERE r.race_rank <= 3) AS mean_points_3r, avg(CAST(r.positionOrder <= 3 AS DOUBLE)) FILTER (WHERE r.race_rank <= 3) AS top3_rate_3r, avg(q.position) FILTER (WHERE r.race_rank <= 3) AS mean_quali_position_3r, avg(CAST(r.position IS NULL AS DOUBLE)) FILTER (WHERE r.race_rank <= 5) AS dnf_rate_5r, avg(CAST(r.statusId = 1 AS DOUBLE)) FILTER (WHERE r.race_rank <= 5) AS finish_rate_5r, avg(r.position) FILTER (WHERE r.race_rank <= 5 AND r.position IS NOT NULL) AS mean_position_5r, avg(r.grid) FILTER (WHERE r.race_rank <= 5) AS mean_grid_5r, avg(r.points) FILTER (WHERE r.race_rank <= 5) AS mean_points_5r, avg(CAST(r.positionOrder <= 3 AS DOUBLE)) FILTER (WHERE r.race_rank <= 5) AS top3_rate_5r, avg(q.position) FILTER (WHERE r.race_rank <= 5) AS mean_quali_position_5r, avg(CAST(r.position IS NULL AS DOUBLE)) FILTER (WHERE r.race_rank <= 10) AS dnf_rate_10r, avg(CAST(r.statusId = 1 AS DOUBLE)) FILTER (WHERE r.race_rank <= 10) AS finish_rate_10r, avg(r.position) FILTER (WHERE r.race_rank <= 10 AND r.position IS NOT NULL) AS mean_position_10r, avg(r.grid) FILTER (WHERE r.race_rank <= 10) AS mean_grid_10r, avg(r.points) FILTER (WHERE r.race_rank <= 10) AS mean_points_10r, avg(CAST(r.positionOrder <= 3 AS DOUBLE)) FILTER (WHERE r.race_rank <= 10) AS top3_rate_10r, avg(q.position) FILTER (WHERE r.race_rank <= 10) AS mean_quali_position_10r, avg(CAST(r.position IS NULL AS DOUBLE)) FILTER (WHERE r.race_rank <= 20) AS dnf_rate_20r, avg(CAST(r.statusId = 1 AS DOUBLE)) FILTER (WHERE r.race_rank <= 20) AS finish_rate_20r, avg(r.position) FILTER (WHERE r.race_rank <= 20 AND r.position IS NOT NULL) AS mean_position_20r, avg(r.grid) FILTER (WHERE r.race_rank <= 20) AS mean_grid_20r, avg(r.points) FILTER (WHERE r.race_rank <= 20) AS mean_points_20r, avg(CAST(r.positionOrder <= 3 AS DOUBLE)) FILTER (WHERE r.race_rank <= 20) AS top3_rate_20r, avg(q.position) FILTER (WHERE r.race_rank <= 20) AS mean_quali_position_20r FROM ranked r LEFT JOIN qualifying q ON q.driverId = r.driverId AND q.raceId = r.raceId AND q.date < r.cutoff GROUP BY r.entity_id, r.cutoff) SELECT e.driverId, e.date, coalesce(s.races_all, 0) AS races_all, s.* EXCLUDE (entity_id, cutoff, races_all) FROM eval_table e LEFT JOIN summary s ON s.entity_id = e.driverId AND s.cutoff = e.date"
+    },
+    {
+     "name": "current_constructor_history",
+     "sql": "WITH latest AS (SELECT e.driverId, e.date AS cutoff, r.constructorId FROM eval_table e JOIN results r ON r.driverId = e.driverId AND r.date < e.date QUALIFY row_number() OVER (PARTITION BY e.driverId, e.date ORDER BY r.date DESC, r.raceId DESC) = 1), constructor_races AS (SELECT e.driverId, e.date AS cutoff, r.constructorId, r.raceId, max(r.date) AS race_date, avg(CAST(r.position IS NULL AS DOUBLE)) AS dnf_rate, avg(r.points) AS mean_points FROM eval_table e JOIN latest l ON l.driverId = e.driverId AND l.cutoff = e.date JOIN results r ON r.constructorId = l.constructorId AND r.date < e.date GROUP BY e.driverId, e.date, r.constructorId, r.raceId), ranked AS (SELECT *, row_number() OVER (PARTITION BY driverId, cutoff ORDER BY race_date DESC, raceId DESC) AS race_rank FROM constructor_races), summary AS (SELECT driverId, cutoff, avg(dnf_rate) AS constructor_dnf_rate_20, avg(mean_points) AS constructor_mean_points_20 FROM ranked WHERE race_rank <= 20 GROUP BY driverId, cutoff) SELECT e.driverId, e.date, s.constructor_dnf_rate_20, s.constructor_mean_points_20 FROM eval_table e LEFT JOIN summary s ON s.driverId = e.driverId AND s.cutoff = e.date"
+    },
+    {
+     "name": "latest_standings",
+     "sql": "WITH latest AS (SELECT e.driverId, e.date AS cutoff, CAST(s.position AS BIGINT) AS latest_standing_position, CAST(s.points AS DOUBLE) AS latest_standing_points, CAST(s.wins AS BIGINT) AS latest_standing_wins FROM eval_table e JOIN standings s ON s.driverId = e.driverId AND s.date < e.date QUALIFY row_number() OVER (PARTITION BY e.driverId, e.date ORDER BY s.date DESC, s.raceId DESC) = 1) SELECT e.driverId, e.date, s.latest_standing_position, s.latest_standing_points, s.latest_standing_wins FROM eval_table e LEFT JOIN latest s ON s.driverId = e.driverId AND s.cutoff = e.date"
+    },
+    {
+     "name": "matured_label_history",
+     "sql": "SELECT e.driverId, e.date, count(t.did_not_finish) AS own_prior_n, avg(CAST(t.did_not_finish AS DOUBLE)) AS own_prior_mean, arg_max(CAST(t.did_not_finish AS DOUBLE), t.date) AS own_last_label, date_diff('day', max(t.date), e.date) AS own_last_label_age_days FROM eval_table e LEFT JOIN matured_labels t ON t.driverId = e.driverId AND t.date < e.date AND t.label_window_end < e.date AND t.did_not_finish IS NOT NULL GROUP BY e.driverId, e.date"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "driver_result_evidence",
+   "entity": "driverId",
+   "sql": "WITH latest AS (SELECT e.driverId, e.date AS cutoff, r.constructorId FROM eval_table e JOIN results r ON r.driverId = e.driverId AND r.date < e.date QUALIFY row_number() OVER (PARTITION BY e.driverId, e.date ORDER BY r.date DESC, r.raceId DESC) = 1), own_evidence AS (SELECT e.driverId, e.date, 'result' AS event_kind, date_diff('second', r.date, e.date) / 86400.0 AS age_days, CAST(r.grid AS BIGINT) AS grid, CAST(r.position AS DOUBLE) AS position, CAST(r.positionOrder AS BIGINT) AS positionOrder, CAST(r.points AS DOUBLE) AS points, CAST(r.laps AS BIGINT) AS laps, CAST(r.statusId AS BIGINT) AS statusId, CAST(ra.circuitId AS VARCHAR) AS circuitId, CAST(r.constructorId AS VARCHAR) AS constructorId, CAST(r.position IS NULL AS BIGINT) AS dnf FROM eval_table e JOIN results r ON r.driverId = e.driverId AND r.date < e.date JOIN races ra ON ra.raceId = r.raceId AND ra.date < e.date QUALIFY row_number() OVER (PARTITION BY e.driverId, e.date ORDER BY r.date DESC, r.raceId DESC) <= 16), teammate_evidence AS (SELECT e.driverId, e.date, 'teammate' AS event_kind, date_diff('second', r.date, e.date) / 86400.0 AS age_days, CAST(r.grid AS BIGINT) AS grid, CAST(r.position AS DOUBLE) AS position, CAST(r.positionOrder AS BIGINT) AS positionOrder, CAST(r.points AS DOUBLE) AS points, CAST(r.laps AS BIGINT) AS laps, CAST(r.statusId AS BIGINT) AS statusId, CAST(ra.circuitId AS VARCHAR) AS circuitId, CAST(r.constructorId AS VARCHAR) AS constructorId, CAST(r.position IS NULL AS BIGINT) AS dnf FROM eval_table e JOIN latest l ON l.driverId = e.driverId AND l.cutoff = e.date JOIN results r ON r.constructorId = l.constructorId AND r.driverId <> e.driverId AND r.date < e.date JOIN races ra ON ra.raceId = r.raceId AND ra.date < e.date QUALIFY row_number() OVER (PARTITION BY e.driverId, e.date ORDER BY r.date DESC, r.raceId DESC, r.driverId) <= 8) SELECT * FROM own_evidence UNION ALL SELECT * FROM teammate_evidence",
+   "max_rows_per_case": 24,
+   "fkeys": {}
+  }
+ ]
+}

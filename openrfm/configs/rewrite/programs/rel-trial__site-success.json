@@ -1,0 +1,59 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-trial",
+ "task": "site-success",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "facilities",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "studies",
+   "columns": [
+    "nct_id",
+    "start_date",
+    "brief_title",
+    "study_type",
+    "phase",
+    "enrollment",
+    "enrollment_type",
+    "number_of_arms",
+    "number_of_groups",
+    "source_class"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "facilities__snapshot",
+   "entity": "facility_id",
+   "blocks": [
+    {
+     "name": "historical_trial_mix",
+     "sql": "WITH links AS (SELECT e.facility_id, e.timestamp, fs.nct_id, MIN(fs.date) AS first_seen FROM eval_table e JOIN facilities_studies fs ON fs.facility_id = e.facility_id AND fs.date < e.timestamp JOIN studies s ON s.nct_id = fs.nct_id AND s.start_date < e.timestamp GROUP BY e.facility_id, e.timestamp, fs.nct_id) SELECT e.facility_id, e.timestamp, EXTRACT(year FROM e.timestamp) AS cutoff_year, COUNT(l.nct_id) AS prior_studies, COUNT(l.nct_id) FILTER (WHERE l.first_seen >= e.timestamp - INTERVAL '365 days') AS studies_added_last_year, COUNT(l.nct_id) FILTER (WHERE l.first_seen >= e.timestamp - INTERVAL '730 days' AND l.first_seen < e.timestamp - INTERVAL '365 days') AS studies_added_previous_year, DATE_DIFF('day', MAX(l.first_seen), e.timestamp) AS days_since_latest_study, DATE_DIFF('day', MIN(l.first_seen), e.timestamp) AS observed_history_days, AVG(s.enrollment) AS mean_enrollment, MEDIAN(s.enrollment) AS median_enrollment, AVG(s.number_of_arms) AS mean_arms, COUNT(l.nct_id) FILTER (WHERE LOWER(s.study_type) = 'interventional') AS interventional_studies, COUNT(l.nct_id) FILTER (WHERE LOWER(s.study_type) = 'observational') AS observational_studies, COUNT(l.nct_id) FILTER (WHERE s.phase LIKE '%1%') AS phase1_studies, COUNT(l.nct_id) FILTER (WHERE s.phase LIKE '%2%') AS phase2_studies, COUNT(l.nct_id) FILTER (WHERE s.phase LIKE '%3%') AS phase3_studies, COUNT(l.nct_id) FILTER (WHERE s.phase LIKE '%4%') AS phase4_studies FROM eval_table e LEFT JOIN links l ON l.facility_id = e.facility_id AND l.timestamp = e.timestamp LEFT JOIN studies s ON s.nct_id = l.nct_id AND s.start_date < e.timestamp GROUP BY e.facility_id, e.timestamp"
+    },
+    {
+     "name": "historical_statistical_results",
+     "sql": "WITH links AS (SELECT DISTINCT e.facility_id, e.timestamp, fs.nct_id FROM eval_table e JOIN facilities_studies fs ON fs.facility_id = e.facility_id AND fs.date < e.timestamp JOIN studies s ON s.nct_id = fs.nct_id AND s.start_date < e.timestamp), per_study AS (SELECT l.facility_id, l.timestamp, l.nct_id, COUNT(oa.id) AS analyses, COUNT(*) FILTER (WHERE COALESCE(oa.p_value, oa.p_value_raw) BETWEEN 0 AND 1) AS p_count, COUNT(*) FILTER (WHERE COALESCE(oa.p_value, oa.p_value_raw) >= 0 AND COALESCE(oa.p_value, oa.p_value_raw) < 0.05) AS significant_count, COUNT(*) FILTER (WHERE COALESCE(oa.p_value, oa.p_value_raw) >= 0 AND COALESCE(oa.p_value, oa.p_value_raw) < 0.01) AS strong_count, COUNT(*) FILTER (WHERE LOWER(o.outcome_type) = 'primary' AND COALESCE(oa.p_value, oa.p_value_raw) BETWEEN 0 AND 1) AS primary_p_count, COUNT(*) FILTER (WHERE LOWER(o.outcome_type) = 'primary' AND COALESCE(oa.p_value, oa.p_value_raw) >= 0 AND COALESCE(oa.p_value, oa.p_value_raw) < 0.05) AS primary_significant_count, COUNT(*) FILTER (WHERE oa.date >= l.timestamp - INTERVAL '365 days' AND COALESCE(oa.p_value, oa.p_value_raw) BETWEEN 0 AND 1) AS recent_p_count, COUNT(*) FILTER (WHERE oa.date >= l.timestamp - INTERVAL '365 days' AND COALESCE(oa.p_value, oa.p_value_raw) >= 0 AND COALESCE(oa.p_value, oa.p_value_raw) < 0.05) AS recent_significant_count, MAX(oa.date) AS latest_analysis_at FROM links l LEFT JOIN outcome_analyses oa ON oa.nct_id = l.nct_id AND oa.date < l.timestamp LEFT JOIN outcomes o ON o.id = oa.outcome_id AND o.nct_id = l.nct_id AND o.date < l.timestamp GROUP BY l.facility_id, l.timestamp, l.nct_id) SELECT e.facility_id, e.timestamp, COUNT(p.nct_id) FILTER (WHERE p.analyses > 0) AS studies_with_analyses, COUNT(p.nct_id) FILTER (WHERE p.p_count > 0) AS studies_with_p_values, COUNT(p.nct_id) FILTER (WHERE p.significant_count > 0) AS studies_with_significant_result, COALESCE(SUM(p.analyses), 0) AS analysis_count, COALESCE(SUM(p.p_count), 0) AS valid_p_count, COALESCE(SUM(p.significant_count), 0) AS significant_p_count, SUM(p.significant_count) * 1.0 / NULLIF(SUM(p.p_count), 0) AS pooled_significant_fraction, AVG(p.significant_count * 1.0 / NULLIF(p.p_count, 0)) AS mean_study_significant_fraction, AVG(CASE WHEN p.p_count > 0 THEN CASE WHEN p.significant_count > 0 THEN 1.0 ELSE 0.0 END END) AS fraction_studies_any_significant, SUM(p.strong_count) * 1.0 / NULLIF(SUM(p.p_count), 0) AS strong_result_fraction, COALESCE(SUM(p.primary_p_count), 0) AS primary_p_count, SUM(p.primary_significant_count) * 1.0 / NULLIF(SUM(p.primary_p_count), 0) AS primary_significant_fraction, COALESCE(SUM(p.recent_p_count), 0) AS p_count_last_year, SUM(p.recent_significant_count) * 1.0 / NULLIF(SUM(p.recent_p_count), 0) AS significant_fraction_last_year, DATE_DIFF('day', MAX(p.latest_analysis_at), e.timestamp) AS days_since_latest_analysis FROM eval_table e LEFT JOIN per_study p ON p.facility_id = e.facility_id AND p.timestamp = e.timestamp GROUP BY e.facility_id, e.timestamp"
+    },
+    {
+     "name": "fully_matured_site_history",
+     "sql": "SELECT e.facility_id, e.timestamp, COUNT(m.success_rate) AS matured_observations, AVG(m.success_rate) AS mean_matured_success_rate, STDDEV_POP(m.success_rate) AS matured_success_stddev, ARG_MAX(m.success_rate, m.timestamp) AS latest_matured_success_rate, AVG(m.success_rate) FILTER (WHERE m.timestamp >= e.timestamp - INTERVAL '3 years') AS mean_matured_success_last_three_years, COUNT(m.success_rate) FILTER (WHERE m.timestamp >= e.timestamp - INTERVAL '3 years') AS matured_observations_last_three_years, DATE_DIFF('day', MAX(m.timestamp), e.timestamp) AS days_since_latest_matured_case, DATE_DIFF('day', MAX(m.label_window_end), e.timestamp) AS days_since_latest_label_matured FROM eval_table e LEFT JOIN matured_labels m ON m.facility_id = e.facility_id AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp GROUP BY e.facility_id, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "facility_recent_study_results",
+   "entity": "facility_id",
+   "max_rows_per_case": 12,
+   "fkeys": {
+    "nct_id": "studies"
+   },
+   "sql": "WITH links AS (SELECT e.facility_id, e.timestamp, fs.nct_id, MIN(fs.date) AS first_seen FROM eval_table e JOIN facilities_studies fs ON fs.facility_id = e.facility_id AND fs.date < e.timestamp JOIN studies s ON s.nct_id = fs.nct_id AND s.start_date < e.timestamp GROUP BY e.facility_id, e.timestamp, fs.nct_id), results AS (SELECT l.facility_id, l.timestamp, l.nct_id, l.first_seen, MAX(oa.date) AS latest_analysis_at, COUNT(oa.id) AS analysis_count, COUNT(*) FILTER (WHERE COALESCE(oa.p_value, oa.p_value_raw) BETWEEN 0 AND 1) AS valid_p_count, COUNT(*) FILTER (WHERE COALESCE(oa.p_value, oa.p_value_raw) >= 0 AND COALESCE(oa.p_value, oa.p_value_raw) < 0.05) AS significant_p_count, MIN(COALESCE(oa.p_value, oa.p_value_raw)) FILTER (WHERE COALESCE(oa.p_value, oa.p_value_raw) BETWEEN 0 AND 1) AS minimum_p_value, AVG(COALESCE(oa.p_value, oa.p_value_raw)) FILTER (WHERE COALESCE(oa.p_value, oa.p_value_raw) BETWEEN 0 AND 1) AS mean_p_value FROM links l LEFT JOIN outcome_analyses oa ON oa.nct_id = l.nct_id AND oa.date < l.timestamp GROUP BY l.facility_id, l.timestamp, l.nct_id, l.first_seen), ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY facility_id, timestamp ORDER BY GREATEST(first_seen, COALESCE(latest_analysis_at, first_seen)) DESC, nct_id) AS recency_rank FROM results) SELECT facility_id, timestamp, nct_id, first_seen, latest_analysis_at, analysis_count, valid_p_count, significant_p_count, significant_p_count * 1.0 / NULLIF(valid_p_count, 0) AS significant_fraction, minimum_p_value, mean_p_value FROM ranked WHERE recency_rank <= 12"
+  }
+ ]
+}

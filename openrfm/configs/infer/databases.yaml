@@ -1,0 +1,19 @@
+# Normalization cutoff of each benchmark database (`openrfm convert --time-cutoffs`): numbers, booleans and timestamps
+# are normalized with statistics of rows before it.
+cutoffs:
+  rel-amazon: "2016-01-01"
+  rel-arxiv: "2022-01-01"
+  rel-avito: "2015-05-08"
+  rel-event: "2012-11-22"
+  rel-f1: "2005-01-01"
+  rel-hm: "2020-09-14"
+  rel-ratebeer: "2020-01-01"
+  rel-stack: "2021-01-01"
+  rel-trial: "2021-01-01"
+  amazon-4db: "2015-10-03"
+  outbrain-4db: "2016-06-24"
+  retailrocket-4db: "2015-09-16"
+  stackexchange-4db: "2020-05-10"
+# Databases whose archived rows without a dated foreign key are dated by their own time column
+# (openrfm.archive.node_time).
+own_row_time: [outbrain-4db, stackexchange-4db]

@@ -1,0 +1,39 @@
+# Recipe R1: frozen backbone -> memory read -> frozen Kumo-Tabular small. Per task only the context length L,
+# the support budget K, the number of support draws E and the support pool vary.
+# `default` is the cell of a task declared with `openrfm predict --spec`.
+default:
+  classification: {task_type: classification, schema: plain, L: 1024, K: 4096, E: 4, selection: random, transform: null, support: standard}
+  regression: {task_type: regression, schema: plain, L: 1024, K: 4096, E: 4, selection: random, transform: identity, support: standard}
+tasks:
+  amazon-4db/user-churn: {task_type: classification, schema: plain, L: 1024, K: 4096, E: 16, selection: random, transform: null, support: expanded, disjoint_draws: true}
+  outbrain-4db/ad-ctr: {task_type: classification, schema: repair, L: 1024, K: 65536, E: 4, selection: random, transform: null, support: expanded, disjoint_draws: false}
+  rel-amazon/item-churn: {task_type: classification, schema: plain, L: 4096, K: 8192, E: 4, selection: random, transform: null, support: standard}
+  rel-amazon/item-ltv: {task_type: regression, schema: plain, L: 1024, K: 65536, E: 4, selection: random, transform: identity, support: expanded, disjoint_draws: false}
+  rel-amazon/user-churn: {task_type: classification, schema: plain, L: 4096, K: 16384, E: 4, selection: random, transform: null, support: standard}
+  rel-amazon/user-ltv: {task_type: regression, schema: plain, L: 1024, K: 16384, E: 4, selection: random, transform: identity, support: standard}
+  rel-arxiv/author-publication: {task_type: regression, schema: plain, L: 1024, K: 4096, E: 4, selection: random, transform: identity, support: standard}
+  rel-arxiv/paper-citation: {task_type: classification, schema: plain, L: 4096, K: 16384, E: 4, selection: random, transform: null, support: standard}
+  rel-avito/ad-ctr: {task_type: regression, schema: plain, L: 4096, K: 2048, E: 4, selection: random, transform: identity, support: standard}
+  rel-avito/user-clicks: {task_type: classification, schema: plain, L: 1024, K: 8192, E: 4, selection: random, transform: null, support: standard}
+  rel-avito/user-visits: {task_type: classification, schema: plain, L: 1024, K: 4096, E: 4, selection: random, transform: null, support: standard}
+  rel-event/user-attendance: {task_type: regression, schema: plain, L: 4096, K: 2048, E: 4, selection: random, transform: identity, support: standard}
+  rel-event/user-ignore: {task_type: classification, schema: plain, L: 1024, K: 512, E: 4, selection: random, transform: null, support: expanded, disjoint_draws: true}
+  rel-event/user-repeat: {task_type: classification, schema: plain, L: 1024, K: 2048, E: 4, selection: random, transform: null, support: standard}
+  rel-f1/driver-dnf: {task_type: classification, schema: plain, L: 1024, K: 2048, E: 4, selection: random, transform: null, support: standard}
+  rel-f1/driver-position: {task_type: regression, schema: plain, L: 1024, K: 2048, E: 4, selection: random, transform: identity, support: standard}
+  rel-f1/driver-top3: {task_type: classification, schema: plain, L: 1024, K: 512, E: 4, selection: random, transform: null, support: standard}
+  rel-hm/item-sales: {task_type: regression, schema: plain, L: 1024, K: 8192, E: 4, selection: random, transform: identity, support: standard}
+  rel-hm/user-churn: {task_type: classification, schema: plain, L: 1024, K: 16384, E: 4, selection: random, transform: null, support: standard}
+  rel-ratebeer/beer-churn: {task_type: classification, schema: plain, L: 4096, K: 2048, E: 4, selection: random, transform: null, support: standard}
+  rel-ratebeer/brewer-dormant: {task_type: classification, schema: plain, L: 1024, K: 16384, E: 4, selection: random, transform: null, support: standard}
+  rel-ratebeer/user-churn: {task_type: classification, schema: plain, L: 1024, K: 16384, E: 4, selection: random, transform: null, support: standard}
+  rel-ratebeer/user-count: {task_type: regression, schema: plain, L: 4096, K: 32768, E: 4, selection: random, transform: identity, support: expanded, disjoint_draws: false}
+  rel-stack/post-votes: {task_type: regression, schema: plain, L: 1024, K: 2048, E: 4, selection: random, transform: identity, support: standard}
+  rel-stack/user-badge: {task_type: classification, schema: plain, L: 1024, K: 16384, E: 4, selection: random, transform: null, support: standard}
+  rel-stack/user-engagement: {task_type: classification, schema: plain, L: 1024, K: 8192, E: 4, selection: random, transform: null, support: standard}
+  rel-trial/site-success: {task_type: regression, schema: plain, L: 4096, K: 4096, E: 4, selection: random, transform: identity, support: standard}
+  rel-trial/study-adverse: {task_type: regression, schema: plain, L: 1024, K: 16384, E: 4, selection: random, transform: identity, support: standard}
+  rel-trial/study-outcome: {task_type: classification, schema: plain, L: 1024, K: 8192, E: 4, selection: random, transform: null, support: standard}
+  retailrocket-4db/item-cvr: {task_type: classification, schema: repair, L: 4096, K: 16384, E: 4, selection: random, transform: null, support: standard}
+  stackexchange-4db/post-upvote: {task_type: classification, schema: plain, L: 4096, K: 2048, E: 4, selection: random, transform: null, support: expanded, disjoint_draws: true}
+  stackexchange-4db/user-churn: {task_type: classification, schema: plain, L: 1024, K: 16384, E: 4, selection: random, transform: null, support: standard}

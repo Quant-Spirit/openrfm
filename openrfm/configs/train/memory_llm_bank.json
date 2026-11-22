@@ -1,0 +1,1604 @@
+{
+ "schema": "temporal_llm_bank_v1",
+ "blocks": [
+  {
+   "id": "p01/history_extent",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS lifetime_events, COUNT(DISTINCT CAST(v.date AS DATE)) AS lifetime_active_days, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS days_since_last_event, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS days_since_first_event, DATE_DIFF('second', MIN(v.date), MAX(v.date))/86400.0 AS observed_event_span_days, COUNT(v.id)/(1.0 + DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0) AS lifetime_events_per_day FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "days_since_last_event",
+    "days_since_first_event",
+    "observed_event_span_days",
+    "lifetime_events_per_day"
+   ]
+  },
+  {
+   "id": "p01/recent_activity",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS events_1d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '3 days') AS events_3d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS events_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days') AS events_14d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS events_30d, COUNT(v.id) AS events_90d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "events_1d",
+    "events_3d",
+    "events_7d",
+    "events_14d",
+    "events_30d",
+    "events_90d"
+   ]
+  },
+  {
+   "id": "p01/activity_change",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') - COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days' AND v.date < e.timestamp - INTERVAL '7 days') AS weekly_count_change, (COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') + 0.5)/(COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '28 days' AND v.date < e.timestamp - INTERVAL '7 days')/3.0 + 0.5) AS recent_week_rate_ratio, (COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') + 0.5)/(COUNT(v.id) FILTER (WHERE v.date < e.timestamp - INTERVAL '30 days')/2.0 + 0.5) AS recent_month_rate_ratio, SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/7.0)) AS decayed_events_7d, SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/30.0)) AS decayed_events_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "weekly_count_change",
+    "recent_week_rate_ratio",
+    "recent_month_rate_ratio",
+    "decayed_events_7d",
+    "decayed_events_30d"
+   ]
+  },
+  {
+   "id": "p01/interevent_gaps",
+   "sql": "WITH ordered AS (SELECT e.entity_id, e.timestamp, v.id, v.date, LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS previous_date FROM eval_table e JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp), gaps AS (SELECT entity_id, timestamp, id, date, DATE_DIFF('second', previous_date, date)/86400.0 AS gap_days FROM ordered) SELECT e.entity_id, e.timestamp, AVG(g.gap_days) AS mean_gap_days, MEDIAN(g.gap_days) AS median_gap_days, STDDEV_POP(g.gap_days) AS gap_std_days, MAX(g.gap_days) AS max_gap_days, ARG_MAX(g.gap_days, STRUCT_PACK(d := g.date, i := g.id)) AS latest_gap_days, (DATE_DIFF('second', MAX(g.date), e.timestamp)/86400.0)/(AVG(g.gap_days) + 0.25) AS current_silence_over_mean_gap FROM eval_table e LEFT JOIN gaps g ON g.entity_id = e.entity_id AND g.timestamp = e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "mean_gap_days",
+    "median_gap_days",
+    "gap_std_days",
+    "max_gap_days",
+    "latest_gap_days",
+    "current_silence_over_mean_gap"
+   ]
+  },
+  {
+   "id": "p01/calendar_cadence",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(DISTINCT CAST(v.date AS DATE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS active_days_7d, COUNT(DISTINCT CAST(v.date AS DATE)) AS active_days_30d, AVG(CASE WHEN EXTRACT(DOW FROM v.date) = EXTRACT(DOW FROM e.timestamp) THEN 1.0 ELSE 0.0 END) FILTER (WHERE v.id IS NOT NULL) AS same_weekday_event_share, DATE_DIFF('second', MAX(v.date) FILTER (WHERE EXTRACT(DOW FROM v.date) = EXTRACT(DOW FROM e.timestamp)), e.timestamp)/86400.0 AS days_since_same_weekday_event FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "active_days_7d",
+    "active_days_30d",
+    "same_weekday_event_share",
+    "days_since_same_weekday_event"
+   ]
+  },
+  {
+   "id": "p01/x0_history",
+   "sql": "SELECT e.entity_id, e.timestamp, ARG_MAX(v.x0, STRUCT_PACK(d := v.date, i := v.id)) AS last_x0, AVG(v.x0) AS mean_x0, STDDEV_POP(v.x0) AS std_x0, MIN(v.x0) AS min_x0, MAX(v.x0) AS max_x0, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS mean_x0_7d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "std_x0",
+    "max_x0",
+    "mean_x0_7d"
+   ]
+  },
+  {
+   "id": "p01/x0_dynamics",
+   "sql": "WITH ordered AS (SELECT e.entity_id, e.timestamp, v.id, v.date, v.x0, LAG(v.x0) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS previous_x0 FROM eval_table e JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT e.entity_id, e.timestamp, ARG_MAX(v.x0 - v.previous_x0, STRUCT_PACK(d := v.date, i := v.id)) AS last_x0_change, AVG(ABS(v.x0 - v.previous_x0)) AS mean_abs_x0_change, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') - AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days' AND v.date < e.timestamp - INTERVAL '7 days') AS x0_recent_shift, REGR_SLOPE(v.x0, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_slope_30d, SUM(v.x0 * EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/14.0))/NULLIF(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/14.0)), 0) AS x0_decay_mean_14d FROM eval_table e LEFT JOIN ordered v ON v.entity_id = e.entity_id AND v.timestamp = e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "last_x0_change",
+    "mean_abs_x0_change",
+    "x0_recent_shift",
+    "x0_slope_30d",
+    "x0_decay_mean_14d"
+   ]
+  },
+  {
+   "id": "p01/entity_hub_behavior",
+   "sql": "SELECT e.entity_id, e.timestamp, MAX(n.x) AS entity_x, MAX(h.x) AS home_hub_x, AVG(CASE WHEN v.hub = n.hub THEN 1.0 ELSE 0.0 END) FILTER (WHERE v.id IS NOT NULL) AS home_event_share_90d, COUNT(DISTINCT v.hub) AS distinct_event_hubs_90d FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN hub h ON h.id = n.hub LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "entity_x",
+    "home_hub_x",
+    "home_event_share_90d",
+    "distinct_event_hubs_90d"
+   ]
+  },
+  {
+   "id": "p01/home_hub_context",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS other_entity_hub_events_7d, COUNT(v.id) AS other_entity_hub_events_30d, COUNT(DISTINCT v.entity) AS other_active_entities_30d, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS days_since_other_hub_event, (COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') + 0.5)/(COUNT(v.id) FILTER (WHERE v.date < e.timestamp - INTERVAL '7 days')/ (23.0/7.0) + 0.5) AS hub_weekly_rate_ratio FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN event v ON v.hub = n.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "other_entity_hub_events_7d",
+    "other_entity_hub_events_30d",
+    "other_active_entities_30d",
+    "days_since_other_hub_event",
+    "hub_weekly_rate_ratio"
+   ]
+  },
+  {
+   "id": "p01/available_label_history",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(l.y) AS available_label_count, ARG_MAX(l.y, STRUCT_PACK(a := l.available_at, d := l.date, h := l.hub, y := l.y)) AS latest_available_y, AVG(l.y) AS historical_mean_y, AVG(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '30 days') AS recent_available_mean_y, DATE_DIFF('second', MAX(l.available_at), e.timestamp)/86400.0 AS days_since_label_available, SUM(l.y * EXP(-DATE_DIFF('second', l.available_at, e.timestamp)/86400.0/30.0))/NULLIF(SUM(EXP(-DATE_DIFF('second', l.available_at, e.timestamp)/86400.0/30.0)) FILTER (WHERE l.y IS NOT NULL), 0) AS decayed_label_mean FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "latest_available_y",
+    "historical_mean_y",
+    "recent_available_mean_y",
+    "decayed_label_mean"
+   ]
+  },
+  {
+   "id": "p01/x1_state",
+   "sql": "SELECT e.entity_id, e.timestamp, ARG_MAX(v.x1, STRUCT_PACK(d := v.date, i := v.id)) AS last_x1, AVG(v.x1) AS mean_x1, STDDEV_POP(v.x1) AS std_x1, AVG(v.x1) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') - AVG(v.x1) FILTER (WHERE v.date < e.timestamp - INTERVAL '7 days') AS x1_recent_shift, REGR_SLOPE(v.x1, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS x1_slope_90d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "last_x1",
+    "mean_x1",
+    "std_x1",
+    "x1_recent_shift",
+    "x1_slope_90d"
+   ]
+  },
+  {
+   "id": "p01/x2_state",
+   "sql": "SELECT e.entity_id, e.timestamp, ARG_MAX(v.x2, STRUCT_PACK(d := v.date, i := v.id)) AS last_x2, AVG(v.x2) AS mean_x2_90d, AVG(v.x2) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') - AVG(v.x2) FILTER (WHERE v.date < e.timestamp - INTERVAL '7 days') AS x2_recent_shift FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "last_x2",
+    "mean_x2_90d",
+    "x2_recent_shift"
+   ]
+  },
+  {
+   "id": "p02/event_counts",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS n_all, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS n_1d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS n_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days') AS n_14d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS n_30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS n_90d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '180 days') AS n_180d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "n_180d"
+   ]
+  },
+  {
+   "id": "p02/history_recency",
+   "sql": "SELECT e.entity_id, e.timestamp, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS days_since_last, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS history_age_days, DATE_DIFF('second', MIN(v.date), MAX(v.date))/86400.0 AS observed_span_days, COUNT(v.id)/GREATEST(1.0, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0) AS lifetime_daily_rate, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 / GREATEST(1.0, DATE_DIFF('second', MIN(v.date), MAX(v.date))/86400.0 / GREATEST(COUNT(v.id)-1, 1)) AS silence_to_mean_spacing FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "lifetime_daily_rate",
+    "silence_to_mean_spacing"
+   ]
+  },
+  {
+   "id": "p02/decayed_activity",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/2.0)),0) AS decay_2d, COALESCE(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/7.0)),0) AS decay_7d, COALESCE(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/30.0)),0) AS decay_30d, COALESCE(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/90.0)),0) AS decay_90d, COALESCE(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/365.0)),0) AS decay_365d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "decay_2d",
+    "decay_30d",
+    "decay_90d"
+   ]
+  },
+  {
+   "id": "p02/event_spacing",
+   "sql": "WITH w AS (SELECT e.entity_id, e.timestamp, v.date, LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS prev_date, ROW_NUMBER() OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date DESC, v.id DESC) AS reverse_rank FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp), g AS (SELECT entity_id, timestamp, reverse_rank, DATE_DIFF('second', prev_date, date)/86400.0 AS gap_days FROM w) SELECT e.entity_id, e.timestamp, AVG(g.gap_days) AS gap_mean, MEDIAN(g.gap_days) AS gap_median, STDDEV_SAMP(g.gap_days) AS gap_std, MAX(g.gap_days) FILTER (WHERE g.reverse_rank = 1) AS latest_gap, AVG(g.gap_days) FILTER (WHERE g.reverse_rank <= 5) AS recent_five_gap_mean FROM eval_table e LEFT JOIN g ON g.entity_id = e.entity_id AND g.timestamp = e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "gap_std",
+    "recent_five_gap_mean"
+   ]
+  },
+  {
+   "id": "p02/active_days",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(a.active_days_30d,0) AS active_days_30d, COALESCE(a.active_days_90d,0) AS active_days_90d, a.events_per_active_day_30d, COALESCE(a.max_daily_events_30d,0) AS max_daily_events_30d, COALESCE(a.multi_event_days_90d,0) AS multi_event_days_90d FROM eval_table e LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE d.day >= CAST(e.timestamp - INTERVAL '30 days' AS DATE)) AS active_days_30d, COUNT(*) AS active_days_90d, AVG(d.n) FILTER (WHERE d.day >= CAST(e.timestamp - INTERVAL '30 days' AS DATE)) AS events_per_active_day_30d, MAX(d.n) FILTER (WHERE d.day >= CAST(e.timestamp - INTERVAL '30 days' AS DATE)) AS max_daily_events_30d, COUNT(*) FILTER (WHERE d.n > 1) AS multi_event_days_90d FROM (SELECT CAST(v.date AS DATE) AS day, COUNT(*) AS n FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY CAST(v.date AS DATE)) d) a ON TRUE",
+   "columns": [
+    "active_days_90d",
+    "events_per_active_day_30d",
+    "max_daily_events_30d",
+    "multi_event_days_90d"
+   ]
+  },
+  {
+   "id": "p02/rate_changes",
+   "sql": "SELECT e.entity_id, e.timestamp, a.n7 - a.p7 AS weekly_count_change, a.n30 - a.p30 AS monthly_count_change, (a.n7+1.0)/(a.p7+1.0) AS weekly_count_ratio, (a.n30+1.0)/(a.p30+1.0) AS monthly_count_ratio, a.n7/7.0 - (a.n30-a.n7)/23.0 AS recent_rate_acceleration FROM eval_table e LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS n7, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days' AND v.date < e.timestamp - INTERVAL '7 days') AS p7, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS n30, COUNT(*) FILTER (WHERE v.date < e.timestamp - INTERVAL '30 days') AS p30 FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '60 days') a ON TRUE",
+   "columns": [
+    "monthly_count_change",
+    "weekly_count_ratio",
+    "monthly_count_ratio",
+    "recent_rate_acceleration"
+   ]
+  },
+  {
+   "id": "p02/hub_behavior",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(DISTINCT v.hub) AS distinct_hubs, COUNT(v.id) FILTER (WHERE v.hub = en.hub)*1.0/NULLIF(COUNT(v.id),0) AS home_event_fraction, COUNT(DISTINCT v.hub) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS distinct_hubs_30d, AVG(h.x) AS visited_hub_x_mean FROM eval_table e LEFT JOIN entity en ON en.id = e.entity_id LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp LEFT JOIN hub h ON h.id = v.hub GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "home_event_fraction",
+    "distinct_hubs_30d",
+    "visited_hub_x_mean"
+   ]
+  },
+  {
+   "id": "p02/event_x0",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) AS x0_mean, STDDEV_SAMP(v.x0) AS x0_std, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_mean_30d, ARG_MAX(v.x0, STRUCT_PACK(dt := v.date, event_id := v.id)) AS x0_latest, SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_sum_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x0_std",
+    "x0_mean_30d",
+    "x0_latest",
+    "x0_sum_30d"
+   ]
+  },
+  {
+   "id": "p02/available_labels",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(l.entity_id) AS available_label_count, AVG(l.y) AS label_mean, ARG_MAX(l.y, STRUCT_PACK(avail := l.available_at, label_date := l.date, label_hub := l.hub)) AS latest_available_label, AVG(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '90 days') AS label_mean_available_90d, DATE_DIFF('second', MAX(l.available_at), e.timestamp)/86400.0 AS days_since_label_available FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "label_mean_available_90d"
+   ]
+  },
+  {
+   "id": "p02/population_activity",
+   "sql": "SELECT e.entity_id, e.timestamp, a.population_events_7d, a.population_events_30d, a.population_active_entities_30d, (a.population_events_7d+1.0)/((a.population_events_30d-a.population_events_7d)*7.0/23.0+1.0) AS population_recent_rate_ratio FROM eval_table e LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS population_events_7d, COUNT(*) AS population_events_30d, COUNT(DISTINCT v.entity) AS population_active_entities_30d FROM event v WHERE v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days') a ON TRUE",
+   "columns": [
+    "population_events_30d",
+    "population_active_entities_30d",
+    "population_recent_rate_ratio"
+   ]
+  },
+  {
+   "id": "p03/target_sums",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day'), 0) AS sum_1d, COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days'), 0) AS sum_7d, COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days'), 0) AS sum_14d, COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days'), 0) AS sum_30d, COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days'), 0) AS sum_90d, COALESCE(SUM(v.x0), 0) AS sum_all FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "sum_1d",
+    "sum_7d",
+    "sum_14d",
+    "sum_90d"
+   ]
+  },
+  {
+   "id": "p03/activity_timing",
+   "sql": "SELECT e.entity_id, e.timestamp, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS days_since_last, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS days_since_first, DATE_DIFF('second', MIN(v.date), MAX(v.date))/86400.0 / NULLIF(COUNT(v.id) - 1, 0) AS mean_interevent_days, COUNT(DISTINCT CAST(v.date AS DATE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS active_days_7d, COUNT(DISTINCT CAST(v.date AS DATE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS active_days_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "mean_interevent_days"
+   ]
+  },
+  {
+   "id": "p03/event_magnitude",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) AS x0_mean_all, STDDEV_POP(v.x0) AS x0_std_all, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_mean_30d, STDDEV_POP(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_std_30d, ARG_MAX(v.x0, STRUCT_PACK(t := v.date, k := v.id)) AS x0_latest FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x0_std_30d"
+   ]
+  },
+  {
+   "id": "p03/activity_trends",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days')/7.0 - COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days' AND v.date < e.timestamp - INTERVAL '7 days')/23.0 AS count_rate_change, COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days'), 0)/7.0 - COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days' AND v.date < e.timestamp - INTERVAL '7 days'), 0)/23.0 AS sum_rate_change, COALESCE(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/14.0)), 0) AS decayed_count_14d, COALESCE(SUM(v.x0 * EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/14.0)), 0) AS decayed_sum_14d, REGR_SLOPE(v.x0, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS x0_slope_90d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "sum_rate_change",
+    "decayed_count_14d",
+    "decayed_sum_14d",
+    "x0_slope_90d"
+   ]
+  },
+  {
+   "id": "p03/static_context",
+   "sql": "SELECT e.entity_id, e.timestamp, n.x AS entity_x, h.x AS home_hub_x, n.x * h.x AS entity_hub_x_product FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN hub h ON h.id = n.hub",
+   "columns": [
+    "entity_hub_x_product"
+   ]
+  },
+  {
+   "id": "p03/home_hub_activity",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS home_hub_count_30d, COALESCE(SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days'), 0) AS home_hub_sum_30d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS home_hub_mean_30d, COUNT(v.id) AS home_hub_count_90d, COALESCE(SUM(v.x0), 0) AS home_hub_sum_90d FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN event v ON v.hub = n.hub AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "home_hub_sum_30d",
+    "home_hub_mean_30d",
+    "home_hub_sum_90d"
+   ]
+  },
+  {
+   "id": "p03/home_hub_labels",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(l.y) AS home_hub_label_mean, STDDEV_POP(l.y) AS home_hub_label_std, AVG(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '90 days') AS home_hub_label_mean_90d, COUNT(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '90 days') AS home_hub_label_count_90d FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN labels l ON l.hub = n.hub AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "home_hub_label_std"
+   ]
+  },
+  {
+   "id": "p03/channel_x1",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x1) AS x1_mean_all, AVG(v.x1) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x1_mean_30d, STDDEV_POP(v.x1) AS x1_std_all, ARG_MAX(v.x1, STRUCT_PACK(t := v.date, k := v.id)) AS x1_latest, CORR(v.x1, v.x0) AS x1_x0_corr FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x1_mean_30d",
+    "x1_std_all",
+    "x1_latest",
+    "x1_x0_corr"
+   ]
+  },
+  {
+   "id": "p03/channel_x2",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x2) AS x2_mean_all, AVG(v.x2) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x2_mean_30d, STDDEV_POP(v.x2) AS x2_std_all, ARG_MAX(v.x2, STRUCT_PACK(t := v.date, k := v.id)) AS x2_latest, CORR(v.x2, v.x0) AS x2_x0_corr FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x2_mean_30d",
+    "x2_std_all",
+    "x2_latest",
+    "x2_x0_corr"
+   ]
+  },
+  {
+   "id": "p04/recent_means",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS mean_1d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS mean_7d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days') AS mean_14d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS mean_30d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS mean_90d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '180 days') AS mean_180d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "mean_1d",
+    "mean_14d",
+    "mean_90d"
+   ]
+  },
+  {
+   "id": "p04/recent_support",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS n_1d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS n_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS n_30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS n_90d, STDDEV_SAMP(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS sd_30d, MEDIAN(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS median_90d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "sd_30d",
+    "median_90d"
+   ]
+  },
+  {
+   "id": "p04/decay_and_trend",
+   "sql": "SELECT e.entity_id, e.timestamp, SUM(v.x0 * EXP(-v.age / 7.0)) / NULLIF(SUM(EXP(-v.age / 7.0)), 0) AS decay_mean_7d, SUM(v.x0 * EXP(-v.age / 30.0)) / NULLIF(SUM(EXP(-v.age / 30.0)), 0) AS decay_mean_30d, SUM(v.x0 * EXP(-v.age / 90.0)) / NULLIF(SUM(EXP(-v.age / 90.0)), 0) AS decay_mean_90d, -REGR_SLOPE(v.x0, v.age) FILTER (WHERE v.age <= 90) AS slope_per_day_90d, REGR_INTERCEPT(v.x0, v.age) FILTER (WHERE v.age <= 90) AS trend_at_cutoff_90d FROM eval_table e LEFT JOIN LATERAL (SELECT x0, DATE_DIFF('second', date, e.timestamp) / 86400.0 AS age FROM event WHERE entity = e.entity_id AND date < e.timestamp) v ON TRUE GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "decay_mean_7d",
+    "decay_mean_30d",
+    "decay_mean_90d",
+    "trend_at_cutoff_90d"
+   ]
+  },
+  {
+   "id": "p04/home_and_mobility",
+   "sql": "SELECT e.entity_id, e.timestamp, MAX(h.x) AS home_hub_x, MAX(a.x) AS entity_x, AVG(v.x0) FILTER (WHERE v.hub = a.hub) AS own_home_mean, AVG(v.x0) FILTER (WHERE v.hub <> a.hub) AS own_away_mean, CAST(COUNT(v.id) FILTER (WHERE v.hub = a.hub) AS DOUBLE) / NULLIF(COUNT(v.id), 0) AS home_event_fraction FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN hub h ON h.id = a.hub LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "own_home_mean"
+   ]
+  },
+  {
+   "id": "p04/home_hub_peers",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS peer_n_90d, AVG(v.x0) AS peer_mean_90d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS peer_mean_7d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS peer_mean_30d, STDDEV_SAMP(v.x0) AS peer_sd_90d FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN event v ON v.hub = a.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "peer_mean_90d",
+    "peer_mean_7d",
+    "peer_sd_90d"
+   ]
+  },
+  {
+   "id": "p04/seasonal_history",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) FILTER (WHERE EXTRACT(DOW FROM v.date) = EXTRACT(DOW FROM e.timestamp)) AS same_weekday_mean, COUNT(v.id) FILTER (WHERE EXTRACT(DOW FROM v.date) = EXTRACT(DOW FROM e.timestamp)) AS same_weekday_n, AVG(v.x0) FILTER (WHERE EXTRACT(DOW FROM v.date) IN (0, 6)) - AVG(v.x0) FILTER (WHERE EXTRACT(DOW FROM v.date) NOT IN (0, 6)) AS weekend_mean_difference, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '60 days' AND v.date < e.timestamp - INTERVAL '30 days') AS mean_days30_to60 FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "same_weekday_mean",
+    "same_weekday_n",
+    "weekend_mean_difference",
+    "mean_days30_to60"
+   ]
+  },
+  {
+   "id": "p04/x1_history",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x1) AS x1_mean, AVG(v.x1) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x1_mean_30d, ARG_MAX(v.x1, STRUCT_PACK(event_date := v.date, event_id := v.id)) AS x1_last_observed, CORR(v.x0, v.x1) AS x0_x1_corr, REGR_SLOPE(v.x0, v.x1) AS x0_on_x1_slope FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x1_last_observed",
+    "x0_on_x1_slope"
+   ]
+  },
+  {
+   "id": "p05/activity",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS n_events, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS n_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS n_30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS n_90d, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS days_since_last, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS history_days FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "history_days"
+   ]
+  },
+  {
+   "id": "p05/x0_distribution",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) AS x0_mean, STDDEV_SAMP(v.x0) AS x0_sd, MEDIAN(v.x0) AS x0_median, QUANTILE_CONT(v.x0, 0.1) AS x0_q10, QUANTILE_CONT(v.x0, 0.9) AS x0_q90, AVG(CASE WHEN v.id IS NOT NULL THEN CAST(v.x0 > 0 AS DOUBLE) END) AS positive_rate FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x0_median",
+    "x0_q10",
+    "x0_q90",
+    "positive_rate"
+   ]
+  },
+  {
+   "id": "p05/recent_x0",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS mean_7d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS mean_30d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS mean_90d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS positive_7d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS positive_30d, SUM(v.x0 * EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/30.0))/NULLIF(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/30.0)), 0) AS mean_decay_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "positive_7d",
+    "positive_30d"
+   ]
+  },
+  {
+   "id": "p05/last_values",
+   "sql": "WITH ranked AS (SELECT e.entity_id, e.timestamp, v.id, v.x0, ROW_NUMBER() OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date DESC, v.id DESC) AS rn FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT entity_id, timestamp, MAX(CASE WHEN rn = 1 THEN x0 END) AS last_x0, MAX(CASE WHEN rn = 2 THEN x0 END) AS previous_x0, MAX(CASE WHEN rn = 1 THEN x0 END) - MAX(CASE WHEN rn = 2 THEN x0 END) AS last_change, AVG(x0) FILTER (WHERE rn <= 3) AS last3_mean, AVG(x0) FILTER (WHERE rn <= 5) AS last5_mean, AVG(x0) FILTER (WHERE rn <= 10) AS last10_mean FROM ranked GROUP BY entity_id, timestamp",
+   "columns": [
+    "previous_x0",
+    "last3_mean",
+    "last5_mean",
+    "last10_mean"
+   ]
+  },
+  {
+   "id": "p05/sign_dynamics",
+   "sql": "WITH ranked AS (SELECT e.entity_id, e.timestamp, v.id, v.x0, ROW_NUMBER() OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date DESC, v.id DESC) AS rn, LAG(v.x0) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS prior_x0 FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT entity_id, timestamp, MAX(CASE WHEN rn = 1 AND id IS NOT NULL THEN CAST(x0 > 0 AS DOUBLE) END) AS last_positive, AVG(CAST(x0 > 0 AS DOUBLE)) FILTER (WHERE rn <= 5) AS last5_positive_rate, AVG(CAST(x0 > 0 AS DOUBLE)) FILTER (WHERE rn <= 10) AS last10_positive_rate, AVG(CASE WHEN prior_x0 IS NOT NULL THEN CAST((x0 > 0) <> (prior_x0 > 0) AS DOUBLE) END) AS sign_switch_rate, (SUM(CASE WHEN prior_x0 > 0 AND x0 > 0 THEN 1.0 ELSE 0.0 END) + 1.0)/(COUNT(prior_x0) FILTER (WHERE prior_x0 > 0) + 2.0) AS positive_after_positive, (SUM(CASE WHEN prior_x0 <= 0 AND x0 > 0 THEN 1.0 ELSE 0.0 END) + 1.0)/(COUNT(prior_x0) FILTER (WHERE prior_x0 <= 0) + 2.0) AS positive_after_nonpositive FROM ranked GROUP BY entity_id, timestamp",
+   "columns": [
+    "sign_switch_rate",
+    "positive_after_positive",
+    "positive_after_nonpositive"
+   ]
+  },
+  {
+   "id": "p05/timing_trend",
+   "sql": "WITH timed AS (SELECT e.entity_id, e.timestamp, v.id, v.x0, DATE_DIFF('second', v.date, e.timestamp)/86400.0 AS age_days, DATE_DIFF('second', LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id), v.date)/86400.0 AS gap_days, ROW_NUMBER() OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date DESC, v.id DESC) AS rn FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT entity_id, timestamp, AVG(gap_days) AS gap_mean, STDDEV_SAMP(gap_days) AS gap_sd, MAX(CASE WHEN rn = 1 THEN gap_days END) AS last_gap, REGR_SLOPE(x0, -age_days) AS x0_daily_slope, MIN(age_days) FILTER (WHERE x0 > 0) AS days_since_positive FROM timed GROUP BY entity_id, timestamp",
+   "columns": [
+    "x0_daily_slope",
+    "days_since_positive"
+   ]
+  },
+  {
+   "id": "p05/home_peer_context",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS home_peer_n_90d, AVG(v.x0) AS home_peer_x0_mean_90d, AVG(CAST(v.x0 > 0 AS DOUBLE)) AS home_peer_positive_90d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS home_peer_positive_7d FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN event v ON v.hub = a.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "home_peer_positive_90d",
+    "home_peer_positive_7d"
+   ]
+  },
+  {
+   "id": "p05/last_hub_context",
+   "sql": "SELECT e.entity_id, e.timestamp, MAX(h.x) AS last_hub_x, COUNT(v.id) AS last_hub_peer_n_30d, AVG(v.x0) AS last_hub_peer_x0_mean_30d, AVG(CAST(v.x0 > 0 AS DOUBLE)) AS last_hub_peer_positive_30d FROM eval_table e LEFT JOIN LATERAL (SELECT z.hub FROM event z WHERE z.entity = e.entity_id AND z.date < e.timestamp ORDER BY z.date DESC, z.id DESC LIMIT 1) last_event ON TRUE LEFT JOIN hub h ON h.id = last_event.hub LEFT JOIN event v ON v.hub = last_event.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "last_hub_peer_n_30d",
+    "last_hub_peer_x0_mean_30d",
+    "last_hub_peer_positive_30d"
+   ]
+  },
+  {
+   "id": "p05/x2_history",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x2) AS x2_mean, AVG(v.x2) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x2_mean_30d, FIRST(v.x2 ORDER BY v.date DESC, v.id DESC) FILTER (WHERE v.id IS NOT NULL) AS last_x2, CORR(v.x2, v.x0) AS x2_x0_corr FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "last_x2"
+   ]
+  },
+  {
+   "id": "p06/own_distribution",
+   "sql": "SELECT e.entity_id, e.timestamp, h.n AS history_count, h.med AS past_median, h.avg_x AS past_mean, h.sd AS past_stddev, h.q75-h.q25 AS past_iqr, h.above_rate AS past_above_median_rate FROM eval_table e LEFT JOIN LATERAL (SELECT count(*) AS n, median(v.x0) AS med, avg(v.x0) AS avg_x, stddev_samp(v.x0) AS sd, quantile_cont(v.x0,0.25) AS q25, quantile_cont(v.x0,0.75) AS q75, avg(CASE WHEN v.x0>s.med THEN 1.0 ELSE 0.0 END) AS above_rate FROM event v CROSS JOIN (SELECT median(z.x0) AS med FROM event z WHERE z.entity=e.entity_id AND z.date<e.timestamp) s WHERE v.entity=e.entity_id AND v.date<e.timestamp) h ON TRUE",
+   "columns": [
+    "past_iqr",
+    "past_above_median_rate"
+   ]
+  },
+  {
+   "id": "p06/recent_windows",
+   "sql": "SELECT e.entity_id, e.timestamp, count(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS count_7d, count(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS count_30d, avg(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days')-s.med AS mean_7d_minus_median, avg(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days')-s.med AS mean_30d_minus_median, avg(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days')-s.med AS mean_90d_minus_median, avg(CASE WHEN v.x0>s.med THEN 1.0 ELSE 0.0 END) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS above_rate_30d FROM eval_table e LEFT JOIN LATERAL (SELECT median(z.x0) AS med FROM event z WHERE z.entity=e.entity_id AND z.date<e.timestamp) s ON TRUE LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp,s.med",
+   "columns": [
+    "mean_7d_minus_median",
+    "mean_30d_minus_median",
+    "mean_90d_minus_median",
+    "above_rate_30d"
+   ]
+  },
+  {
+   "id": "p06/last_values",
+   "sql": "SELECT e.entity_id,e.timestamp,h.xs[1]-h.med AS last_minus_median,h.xs[2]-h.med AS previous_minus_median,h.xs[3]-h.med AS third_minus_median,h.xs[1]-h.xs[2] AS last_change,(h.xs[1]-h.med)/NULLIF(h.sd,0) AS last_standardized FROM eval_table e LEFT JOIN LATERAL (SELECT list(v.x0 ORDER BY v.date DESC,v.id DESC) AS xs,median(v.x0) AS med,stddev_samp(v.x0) AS sd FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) h ON TRUE",
+   "columns": [
+    "previous_minus_median",
+    "third_minus_median",
+    "last_standardized"
+   ]
+  },
+  {
+   "id": "p06/recent_sequence",
+   "sql": "SELECT e.entity_id,e.timestamp,r.mean_3-h.med AS last3_mean_minus_median,r.mean_10-h.med AS last10_mean_minus_median,r.rate_3 AS last3_above_rate,r.rate_10 AS last10_above_rate,r.sd_10 AS last10_stddev FROM eval_table e LEFT JOIN LATERAL (SELECT median(v.x0) AS med,list(v.id ORDER BY v.date DESC,v.id DESC) AS ids FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) h ON TRUE LEFT JOIN LATERAL (SELECT avg(v.x0) FILTER (WHERE list_position(h.ids,v.id)<=3) AS mean_3,avg(v.x0) AS mean_10,avg(CASE WHEN v.x0>h.med THEN 1.0 ELSE 0.0 END) FILTER (WHERE list_position(h.ids,v.id)<=3) AS rate_3,avg(CASE WHEN v.x0>h.med THEN 1.0 ELSE 0.0 END) AS rate_10,stddev_samp(v.x0) AS sd_10 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND list_position(h.ids,v.id)<=10) r ON TRUE",
+   "columns": [
+    "last3_mean_minus_median",
+    "last10_mean_minus_median",
+    "last3_above_rate",
+    "last10_stddev"
+   ]
+  },
+  {
+   "id": "p06/trend_and_memory",
+   "sql": "SELECT e.entity_id,e.timestamp,-regr_slope(v.x0,DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS slope_per_day,-regr_slope(v.x0,DATE_DIFF('second',v.date,e.timestamp)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS slope_90d,sum(v.x0*exp(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/7.0))/NULLIF(sum(exp(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/7.0)),0)-s.med AS ew_mean_7d_minus_median,sum(v.x0*exp(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/30.0))/NULLIF(sum(exp(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/30.0)),0)-s.med AS ew_mean_30d_minus_median,sum(CASE WHEN v.x0>s.med THEN exp(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/30.0) ELSE 0.0 END)/NULLIF(sum(exp(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/30.0)),0) AS ew_above_rate_30d FROM eval_table e LEFT JOIN LATERAL (SELECT median(z.x0) AS med FROM event z WHERE z.entity=e.entity_id AND z.date<e.timestamp) s ON TRUE LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp,s.med",
+   "columns": [
+    "ew_mean_7d_minus_median",
+    "ew_mean_30d_minus_median",
+    "ew_above_rate_30d"
+   ]
+  },
+  {
+   "id": "p06/hub_context",
+   "sql": "SELECT e.entity_id,e.timestamp,en.x AS entity_x,hh.x AS home_hub_x,avg(CASE WHEN v.hub=en.hub THEN 1.0 ELSE 0.0 END) AS home_event_fraction,avg(v.x0) FILTER (WHERE v.hub=en.hub)-s.med AS home_mean_minus_median FROM eval_table e LEFT JOIN entity en ON en.id=e.entity_id LEFT JOIN hub hh ON hh.id=en.hub LEFT JOIN LATERAL (SELECT median(z.x0) AS med FROM event z WHERE z.entity=e.entity_id AND z.date<e.timestamp) s ON TRUE LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp,en.x,hh.x,en.hub,s.med",
+   "columns": [
+    "home_mean_minus_median"
+   ]
+  },
+  {
+   "id": "p06/last_hub_peers",
+   "sql": "SELECT e.entity_id,e.timestamp,hh.x AS last_hub_x,CAST(l.hub=en.hub AS DOUBLE) AS last_at_home,p.peer_mean-s.med AS last_hub_peer_mean_minus_median,p.peer_recent_mean-s.med AS last_hub_recent_mean_minus_median,p.peer_n AS last_hub_peer_count FROM eval_table e LEFT JOIN entity en ON en.id=e.entity_id LEFT JOIN LATERAL (SELECT v.hub FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1) l ON TRUE LEFT JOIN hub hh ON hh.id=l.hub LEFT JOIN LATERAL (SELECT median(v.x0) AS med FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) s ON TRUE LEFT JOIN LATERAL (SELECT avg(v.x0) AS peer_mean,avg(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS peer_recent_mean,count(*) AS peer_n FROM event v WHERE v.hub=l.hub AND v.entity<>e.entity_id AND v.date<e.timestamp) p ON TRUE",
+   "columns": [
+    "last_at_home",
+    "last_hub_peer_mean_minus_median",
+    "last_hub_recent_mean_minus_median",
+    "last_hub_peer_count"
+   ]
+  },
+  {
+   "id": "p06/x1_history",
+   "sql": "SELECT e.entity_id,e.timestamp,h.last_x1,h.mean_x1,h.corr_x1_x0,h.recent_x1-h.mean_x1 AS x1_recent_shift FROM eval_table e LEFT JOIN LATERAL (SELECT first(v.x1 ORDER BY v.date DESC,v.id DESC) AS last_x1,avg(v.x1) AS mean_x1,corr(v.x1,v.x0) AS corr_x1_x0,avg(v.x1) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS recent_x1 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) h ON TRUE",
+   "columns": [
+    "x1_recent_shift"
+   ]
+  },
+  {
+   "id": "p06/x2_history",
+   "sql": "SELECT e.entity_id,e.timestamp,h.last_x2,h.mean_x2,h.corr_x2_x0,h.recent_x2-h.mean_x2 AS x2_recent_shift FROM eval_table e LEFT JOIN LATERAL (SELECT first(v.x2 ORDER BY v.date DESC,v.id DESC) AS last_x2,avg(v.x2) AS mean_x2,corr(v.x2,v.x0) AS corr_x2_x0,avg(v.x2) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS recent_x2 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) h ON TRUE",
+   "columns": [
+    "x2_recent_shift"
+   ]
+  },
+  {
+   "id": "p07/entity_history",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS event_count, COUNT(v.id) FILTER (WHERE v.x0 > 0) AS positive_count, AVG(CASE WHEN v.id IS NOT NULL THEN CAST(v.x0 > 0 AS DOUBLE) END) AS positive_fraction, AVG(v.x0) AS x0_mean, STDDEV_POP(v.x0) AS x0_std, AVG(CASE WHEN v.id IS NOT NULL THEN CAST(v.x0 = 0 AS DOUBLE) END) AS zero_fraction FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "positive_count"
+   ]
+  },
+  {
+   "id": "p07/recent_counts",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS count_1d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS count_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS count_30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS count_90d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days' AND v.x0 > 0) AS positive_count_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days' AND v.x0 > 0) AS positive_count_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "positive_count_7d",
+    "positive_count_30d"
+   ]
+  },
+  {
+   "id": "p07/window_fractions",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS fraction_1d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS fraction_7d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS fraction_30d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS fraction_90d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date < e.timestamp - INTERVAL '30 days') AS fraction_before_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "fraction_1d",
+    "fraction_90d",
+    "fraction_before_30d"
+   ]
+  },
+  {
+   "id": "p07/event_recency",
+   "sql": "SELECT e.entity_id, e.timestamp, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS last_event_age, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS first_event_age, DATE_DIFF('second', MAX(v.date) FILTER (WHERE v.x0 > 0), e.timestamp)/86400.0 AS last_positive_age, DATE_DIFF('second', MAX(v.date) FILTER (WHERE v.x0 <= 0), e.timestamp)/86400.0 AS last_nonpositive_age, DATE_DIFF('second', MIN(v.date), MAX(v.date))/86400.0 AS observed_span_days FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "last_nonpositive_age"
+   ]
+  },
+  {
+   "id": "p07/decayed_history",
+   "sql": "WITH weighted AS (SELECT e.entity_id, e.timestamp, v.id, v.x0, EXP(-LN(2.0)*DATE_DIFF('second', v.date, e.timestamp)/86400.0/7.0) AS w7, EXP(-LN(2.0)*DATE_DIFF('second', v.date, e.timestamp)/86400.0/30.0) AS w30, EXP(-LN(2.0)*DATE_DIFF('second', v.date, e.timestamp)/86400.0/90.0) AS w90 FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT entity_id, timestamp, SUM(w7) AS effective_count_7d, SUM(w30) AS effective_count_30d, SUM(w7*CAST(x0 > 0 AS DOUBLE))/NULLIF(SUM(w7),0) AS fraction_half_life_7d, SUM(w30*CAST(x0 > 0 AS DOUBLE))/NULLIF(SUM(w30),0) AS fraction_half_life_30d, SUM(w90*CAST(x0 > 0 AS DOUBLE))/NULLIF(SUM(w90),0) AS fraction_half_life_90d, SUM(w30*x0)/NULLIF(SUM(w30),0) AS x0_mean_half_life_30d FROM weighted GROUP BY entity_id, timestamp",
+   "columns": [
+    "effective_count_7d",
+    "effective_count_30d",
+    "fraction_half_life_7d",
+    "fraction_half_life_30d",
+    "fraction_half_life_90d",
+    "x0_mean_half_life_30d"
+   ]
+  },
+  {
+   "id": "p07/temporal_trends",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') - AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days' AND v.date < e.timestamp - INTERVAL '7 days') AS fraction_recent_week_change, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') - AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days' AND v.date < e.timestamp - INTERVAL '30 days') AS fraction_recent_month_change, REGR_SLOPE(CAST(v.x0 > 0 AS DOUBLE), -DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS positivity_slope_per_day, REGR_SLOPE(v.x0, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS x0_slope_90d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "fraction_recent_week_change",
+    "fraction_recent_month_change",
+    "positivity_slope_per_day"
+   ]
+  },
+  {
+   "id": "p07/cadence_and_transitions",
+   "sql": "WITH sequenced AS (SELECT e.entity_id, e.timestamp, v.id, v.date, v.x0, LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS previous_date, LAG(v.x0) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS previous_x0 FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT entity_id, timestamp, AVG(DATE_DIFF('second', previous_date, date)/86400.0) AS mean_gap_days, STDDEV_POP(DATE_DIFF('second', previous_date, date)/86400.0) AS std_gap_days, AVG(CAST((x0 > 0) <> (previous_x0 > 0) AS DOUBLE)) AS sign_switch_fraction, AVG(CAST(x0 > 0 AS DOUBLE)) FILTER (WHERE previous_x0 > 0) AS positive_after_positive, AVG(CAST(x0 > 0 AS DOUBLE)) FILTER (WHERE previous_x0 <= 0) AS positive_after_nonpositive FROM sequenced GROUP BY entity_id, timestamp",
+   "columns": [
+    "positive_after_positive",
+    "positive_after_nonpositive"
+   ]
+  },
+  {
+   "id": "p07/home_hub_context",
+   "sql": "SELECT e.entity_id, e.timestamp, MAX(h.x) AS home_hub_x, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_count_30d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS hub_fraction_7d, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_fraction_30d, AVG(CAST(v.x0 > 0 AS DOUBLE)) AS hub_fraction_all FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN hub h ON h.id = a.hub LEFT JOIN event v ON v.hub = a.hub AND v.entity <> e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_fraction_30d",
+    "hub_fraction_all"
+   ]
+  },
+  {
+   "id": "p07/entity_location",
+   "sql": "SELECT e.entity_id, e.timestamp, MAX(a.x) AS entity_x, COUNT(DISTINCT v.hub) AS visited_hub_count, AVG(CASE WHEN v.id IS NOT NULL THEN CAST(v.hub = a.hub AS DOUBLE) END) AS home_event_fraction, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.hub = a.hub) AS positive_fraction_at_home, AVG(CAST(v.x0 > 0 AS DOUBLE)) FILTER (WHERE v.hub <> a.hub) AS positive_fraction_away FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "positive_fraction_at_home",
+    "positive_fraction_away"
+   ]
+  },
+  {
+   "id": "p07/available_labels",
+   "sql": "WITH ranked AS (SELECT e.entity_id, e.timestamp, l.y, l.available_at, ROW_NUMBER() OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY l.available_at DESC, l.date DESC, l.hub DESC, l.y DESC) AS rn FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp) SELECT entity_id, timestamp, COUNT(available_at) AS available_label_count, AVG(y) AS label_mean, MAX(y) FILTER (WHERE rn = 1) AS last_available_label, DATE_DIFF('second', MAX(available_at), timestamp)/86400.0 AS last_label_available_age, SUM(y*EXP(-LN(2.0)*DATE_DIFF('second', available_at, timestamp)/86400.0/30.0))/NULLIF(SUM(CASE WHEN y IS NOT NULL THEN EXP(-LN(2.0)*DATE_DIFF('second', available_at, timestamp)/86400.0/30.0) END),0) AS label_mean_half_life_30d FROM ranked GROUP BY entity_id, timestamp",
+   "columns": [
+    "label_mean_half_life_30d"
+   ]
+  },
+  {
+   "id": "p07/optional_x1",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x1) AS x1_mean, STDDEV_POP(v.x1) AS x1_std, AVG(v.x1) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x1_mean_30d, CORR(v.x1, CAST(v.x0 > 0 AS DOUBLE)) AS x1_positivity_correlation, REGR_SLOPE(v.x1, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS x1_slope_per_day FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x1_positivity_correlation",
+    "x1_slope_per_day"
+   ]
+  },
+  {
+   "id": "p08/trajectory",
+   "sql": "SELECT e.entity_id, e.timestamp, REGR_SLOPE(v.x0, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS slope_90d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') - AVG(v.x0) FILTER (WHERE v.date < e.timestamp - INTERVAL '7 days' AND v.date >= e.timestamp - INTERVAL '30 days') AS shift_7d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') - AVG(v.x0) FILTER (WHERE v.date < e.timestamp - INTERVAL '30 days') AS shift_30d, STDDEV_SAMP(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS std_30d, SUM(v.x0 * EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/14.0))/NULLIF(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/14.0)), 0) AS decayed_mean_14d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "shift_30d",
+    "decayed_mean_14d"
+   ]
+  },
+  {
+   "id": "p08/home_hub_distribution",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS peer_events_30d, COUNT(DISTINCT v.entity) AS peer_entities_30d, AVG(v.x0) AS peer_mean_30d, STDDEV_SAMP(v.x0) AS peer_std_30d, QUANTILE_CONT(v.x0, 0.5) AS peer_median_30d FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN event v ON v.hub = a.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "peer_std_30d",
+    "peer_median_30d"
+   ]
+  },
+  {
+   "id": "p08/home_hub_recent_rank",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS peer_events_7d, AVG(v.x0) AS peer_mean_7d, AVG(CASE WHEN v.id IS NOT NULL AND f.last_x0 IS NOT NULL THEN CASE WHEN v.x0 < f.last_x0 THEN 1.0 WHEN v.x0 = f.last_x0 THEN 0.5 ELSE 0.0 END END) AS last_percentile_7d, f.last_x0 - AVG(v.x0) AS last_minus_peer_mean_7d, (f.last_x0 - AVG(v.x0))/NULLIF(STDDEV_SAMP(v.x0), 0) AS last_peer_z_7d FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN LATERAL (SELECT v.x0 AS last_x0 FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp ORDER BY v.date DESC, v.id DESC LIMIT 1) f ON TRUE LEFT JOIN event v ON v.hub = a.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '7 days' GROUP BY e.entity_id, e.timestamp, f.last_x0",
+   "columns": [
+    "last_percentile_7d",
+    "last_minus_peer_mean_7d",
+    "last_peer_z_7d"
+   ]
+  },
+  {
+   "id": "p08/last_hub_context",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS peer_events_30d, COUNT(DISTINCT v.entity) AS peer_entities_30d, AVG(v.x0) AS peer_mean_30d, f.last_x0 - AVG(v.x0) AS last_minus_peer_mean, AVG(CASE WHEN v.id IS NOT NULL AND f.last_x0 IS NOT NULL THEN CASE WHEN v.x0 < f.last_x0 THEN 1.0 WHEN v.x0 = f.last_x0 THEN 0.5 ELSE 0.0 END END) AS last_percentile_30d FROM eval_table e LEFT JOIN LATERAL (SELECT v.hub, v.x0 AS last_x0 FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp ORDER BY v.date DESC, v.id DESC LIMIT 1) f ON TRUE LEFT JOIN event v ON v.hub = f.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days' GROUP BY e.entity_id, e.timestamp, f.last_x0",
+   "columns": [
+    "peer_entities_30d",
+    "peer_mean_30d",
+    "last_minus_peer_mean",
+    "last_percentile_30d"
+   ]
+  },
+  {
+   "id": "p08/equal_weight_peer_rank",
+   "sql": "SELECT e.entity_id, e.timestamp, p.peer_count, p.peer_mean, p.peer_std, p.focal_percentile, (f.focal_mean - p.peer_mean)/NULLIF(p.peer_std, 0) AS focal_peer_z FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN LATERAL (SELECT AVG(v.x0) AS focal_mean FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days') f ON TRUE LEFT JOIN LATERAL (SELECT COUNT(*) AS peer_count, AVG(s.peer_mean) AS peer_mean, STDDEV_SAMP(s.peer_mean) AS peer_std, AVG(CASE WHEN f.focal_mean IS NOT NULL THEN CASE WHEN s.peer_mean < f.focal_mean THEN 1.0 WHEN s.peer_mean = f.focal_mean THEN 0.5 ELSE 0.0 END END) AS focal_percentile FROM (SELECT v.entity, AVG(v.x0) AS peer_mean FROM event v WHERE v.hub = a.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days' GROUP BY v.entity) s) p ON TRUE",
+   "columns": [
+    "peer_mean",
+    "peer_std",
+    "focal_percentile",
+    "focal_peer_z"
+   ]
+  },
+  {
+   "id": "p08/hub_affinity",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(DISTINCT v.hub) AS visited_hubs_90d, AVG(CASE WHEN v.id IS NOT NULL THEN CASE WHEN v.hub = a.hub THEN 1.0 ELSE 0.0 END END) AS home_event_share_90d, AVG(v.x0) FILTER (WHERE v.hub = a.hub) AS home_mean_90d, AVG(v.x0) FILTER (WHERE v.hub <> a.hub) AS away_mean_90d, DATE_DIFF('second', MAX(v.date) FILTER (WHERE v.hub = a.hub), e.timestamp)/86400.0 AS home_recency_days FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "home_mean_90d",
+    "home_recency_days"
+   ]
+  },
+  {
+   "id": "p09/x0_recent",
+   "sql": "SELECT e.entity_id, e.timestamp, ARG_MAX(v.x0, v.date) AS x0_last, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS x0_mean_7d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_mean_30d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS x0_mean_90d, MAX(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_max_30d, STDDEV_SAMP(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_std_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x0_max_30d"
+   ]
+  },
+  {
+   "id": "p09/x0_dynamics",
+   "sql": "SELECT e.entity_id, e.timestamp, SUM(v.x0 * EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/7.0))/NULLIF(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/7.0)), 0) AS x0_ewm_7d, SUM(v.x0 * EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/30.0))/NULLIF(SUM(EXP(-DATE_DIFF('second', v.date, e.timestamp)/86400.0/30.0)), 0) AS x0_ewm_30d, REGR_SLOPE(v.x0, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS x0_daily_slope, ARG_MAX(v.x0, v.date) - AVG(v.x0) AS x0_last_minus_mean, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') - AVG(v.x0) FILTER (WHERE v.date < e.timestamp - INTERVAL '30 days') AS x0_recent_shift FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x0_last_minus_mean",
+    "x0_recent_shift"
+   ]
+  },
+  {
+   "id": "p09/home_competition",
+   "sql": "SELECT e.entity_id, e.timestamp, p.peer_events_30d, p.active_peers_30d, p.peer_mean_30d, p.peer_p90_30d, p.peer_max_30d, s.own_mean_30d - p.peer_mean_30d AS own_minus_peer_mean FROM eval_table e LEFT JOIN entity en ON en.id = e.entity_id LEFT JOIN LATERAL (SELECT COUNT(v.id) AS peer_events_30d, COUNT(DISTINCT v.entity) AS active_peers_30d, AVG(v.x0) AS peer_mean_30d, QUANTILE_CONT(v.x0, 0.9) AS peer_p90_30d, MAX(v.x0) AS peer_max_30d FROM event v WHERE v.hub = en.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days') p ON TRUE LEFT JOIN LATERAL (SELECT AVG(v.x0) AS own_mean_30d FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days') s ON TRUE",
+   "columns": [
+    "peer_p90_30d",
+    "peer_max_30d",
+    "own_minus_peer_mean"
+   ]
+  },
+  {
+   "id": "p09/top_three_proxies",
+   "sql": "SELECT e.entity_id, e.timestamp, s.last_x0 - p.third_best AS last_minus_peer_third_best, s.mean_x0 - p.third_mean AS mean_minus_peer_third_mean, p.peers_above_last, p.peers_above_mean, p.competitors FROM eval_table e LEFT JOIN entity en ON en.id = e.entity_id LEFT JOIN LATERAL (SELECT ARG_MAX(v.x0, v.date) AS last_x0, AVG(v.x0) AS mean_x0 FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp) s ON TRUE LEFT JOIN LATERAL (SELECT LIST_EXTRACT(LIST(q.best_x0 ORDER BY q.best_x0 DESC), 3) AS third_best, LIST_EXTRACT(LIST(q.mean_x0 ORDER BY q.mean_x0 DESC), 3) AS third_mean, COUNT(*) FILTER (WHERE q.best_x0 > s.last_x0) AS peers_above_last, COUNT(*) FILTER (WHERE q.mean_x0 > s.mean_x0) AS peers_above_mean, COUNT(*) AS competitors FROM (SELECT v.entity, MAX(v.x0) AS best_x0, AVG(v.x0) AS mean_x0 FROM event v WHERE v.hub = en.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '90 days' GROUP BY v.entity) q) p ON TRUE",
+   "columns": [
+    "last_minus_peer_third_best",
+    "mean_minus_peer_third_mean",
+    "peers_above_last",
+    "peers_above_mean"
+   ]
+  },
+  {
+   "id": "p10/return_cadence",
+   "sql": "WITH h AS (SELECT e.entity_id,e.timestamp,v.date,LAG(v.date) OVER (PARTITION BY e.entity_id,e.timestamp ORDER BY v.date,v.id) AS previous_date FROM eval_table e JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp), gaps AS (SELECT entity_id,timestamp,DATE_DIFF('second',previous_date,date)/86400.0 AS gap_days FROM h WHERE previous_date IS NOT NULL), a AS (SELECT entity_id,timestamp,AVG(gap_days) AS mean_gap,MEDIAN(gap_days) AS median_gap,STDDEV_SAMP(gap_days) AS gap_sd,MAX(gap_days) AS max_gap FROM gaps GROUP BY entity_id,timestamp) SELECT e.entity_id,e.timestamp,a.mean_gap,a.median_gap,a.gap_sd,a.max_gap,DATE_DIFF('second',(SELECT MAX(v.date) FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp),e.timestamp)/86400.0/NULLIF(a.median_gap,0) AS inactivity_to_median_gap FROM eval_table e LEFT JOIN a ON a.entity_id=e.entity_id AND a.timestamp=e.timestamp",
+   "columns": [
+    "inactivity_to_median_gap"
+   ]
+  },
+  {
+   "id": "p10/decayed_activity",
+   "sql": "SELECT e.entity_id,e.timestamp,SUM(CASE WHEN v.id IS NOT NULL THEN EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/7.0) ELSE 0 END) AS activity_decay_7d,SUM(CASE WHEN v.id IS NOT NULL THEN EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/30.0) ELSE 0 END) AS activity_decay_30d,SUM(CASE WHEN v.id IS NOT NULL THEN EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/90.0) ELSE 0 END) AS activity_decay_90d,COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days')/30.0-COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days' AND v.date<e.timestamp-INTERVAL '30 days')/60.0 AS recent_rate_change,COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days')/90.0-COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '180 days' AND v.date<e.timestamp-INTERVAL '90 days')/90.0 AS medium_rate_change FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "recent_rate_change",
+    "medium_rate_change"
+   ]
+  },
+  {
+   "id": "p10/event_x0",
+   "sql": "SELECT e.entity_id,e.timestamp,ARG_MAX(v.x0,STRUCT_PACK(t:=v.date,i:=v.id)) AS last_x0,AVG(v.x0) AS mean_x0,STDDEV_SAMP(v.x0) AS sd_x0,AVG(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS mean_x0_90d,REGR_SLOPE(v.x0,DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS x0_slope_with_age FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "x0_slope_with_age"
+   ]
+  },
+  {
+   "id": "p10/hub_affinity",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(DISTINCT v.hub) AS distinct_visited_hubs,COUNT(v.id) FILTER (WHERE v.hub=n.hub)*1.0/NULLIF(COUNT(v.id),0) AS home_event_fraction,COUNT(DISTINCT v.hub) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS distinct_hubs_90d,DATE_DIFF('second',MAX(v.date) FILTER (WHERE v.hub=n.hub),e.timestamp)/86400.0 AS days_since_home_event,ARG_MAX(CASE WHEN v.hub=n.hub THEN 1.0 ELSE 0.0 END,STRUCT_PACK(t:=v.date,i:=v.id)) FILTER (WHERE v.id IS NOT NULL) AS last_event_at_home FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "days_since_home_event"
+   ]
+  },
+  {
+   "id": "p10/last_hub_context",
+   "sql": "SELECT e.entity_id,e.timestamp,h.x AS last_hub_x,a.other_events_30d,a.other_events_90d,a.other_entities_90d,a.days_since_other_event FROM eval_table e LEFT JOIN LATERAL (SELECT v.hub FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1) last_visit ON TRUE LEFT JOIN hub h ON h.id=last_visit.hub LEFT JOIN LATERAL (SELECT COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS other_events_30d,COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS other_events_90d,COUNT(DISTINCT v.entity) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS other_entities_90d,DATE_DIFF('second',MAX(v.date),e.timestamp)/86400.0 AS days_since_other_event FROM event v WHERE v.hub=last_visit.hub AND v.entity<>e.entity_id AND v.date<e.timestamp) a ON TRUE",
+   "columns": [
+    "other_events_90d",
+    "other_entities_90d",
+    "days_since_other_event"
+   ]
+  },
+  {
+   "id": "p10/entity_context",
+   "sql": "SELECT e.entity_id,e.timestamp,n.x AS entity_x,h.x AS home_hub_x,(SELECT COUNT(*) FROM entity p WHERE p.hub=n.hub) AS home_entity_count,EXTRACT(DOW FROM e.timestamp)::DOUBLE AS cutoff_day_of_week FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN hub h ON h.id=n.hub",
+   "columns": [
+    "cutoff_day_of_week"
+   ]
+  },
+  {
+   "id": "p10/event_x1",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(v.x1)*1.0/NULLIF(COUNT(v.id),0) AS x1_observed_fraction,ARG_MAX(v.x1,STRUCT_PACK(t:=v.date,i:=v.id)) AS latest_observed_x1,AVG(v.x1) AS mean_x1,STDDEV_SAMP(v.x1) AS sd_x1,AVG(v.x1) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS mean_x1_90d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "sd_x1"
+   ]
+  },
+  {
+   "id": "p11/activity_changes",
+   "sql": "WITH a AS (SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS a1, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS a7, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days' AND v.date < e.timestamp - INTERVAL '7 days') AS p7, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS a30, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '60 days' AND v.date < e.timestamp - INTERVAL '30 days') AS p30 FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp) SELECT entity_id, timestamp, (a7 + 1.0)/(p7 + 1.0) AS ratio_7d, (a30 + 1.0)/(p30 + 1.0) AS ratio_30d, a7 - p7 AS delta_7d, a30 - p30 AS delta_30d, (a1 + 0.25)/((a7 - a1)/6.0 + 0.25) AS latest_day_rate_ratio FROM a",
+   "columns": [
+    "latest_day_rate_ratio"
+   ]
+  },
+  {
+   "id": "p11/interevent_gaps",
+   "sql": "WITH g AS (SELECT e.entity_id, e.timestamp, v.date AS event_date, DATE_DIFF('second', LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id), v.date)/86400.0 AS gap_days FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT entity_id, timestamp, AVG(gap_days) AS gap_mean, MEDIAN(gap_days) AS gap_median, STDDEV_POP(gap_days) AS gap_std, AVG(gap_days) FILTER (WHERE event_date >= timestamp - INTERVAL '30 days') AS recent_gap_mean, (DATE_DIFF('second', MAX(event_date), timestamp)/86400.0)/(MEDIAN(gap_days) + 0.1) AS silence_to_typical_gap FROM g GROUP BY entity_id, timestamp",
+   "columns": [
+    "recent_gap_mean"
+   ]
+  },
+  {
+   "id": "p11/active_day_structure",
+   "sql": "WITH d AS (SELECT e.entity_id, e.timestamp, CAST(v.date AS DATE) AS active_date, COUNT(v.id) AS daily_n FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days' GROUP BY e.entity_id, e.timestamp, CAST(v.date AS DATE)) SELECT entity_id, timestamp, COUNT(active_date) AS active_days_30d, COUNT(active_date) FILTER (WHERE active_date >= CAST(timestamp - INTERVAL '7 days' AS DATE)) AS active_days_recent_7d, COALESCE(MAX(daily_n), 0) AS peak_day_count_30d, SUM(daily_n)*1.0/NULLIF(COUNT(active_date), 0) AS events_per_active_day, SUM(daily_n*daily_n)*1.0/NULLIF(SUM(daily_n)*SUM(daily_n), 0) AS daily_concentration FROM d GROUP BY entity_id, timestamp",
+   "columns": [
+    "active_days_recent_7d",
+    "peak_day_count_30d",
+    "events_per_active_day",
+    "daily_concentration"
+   ]
+  },
+  {
+   "id": "p11/hub_mobility",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(DISTINCT v.hub) AS hubs_all, COUNT(DISTINCT v.hub) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hubs_30d, COUNT(v.id) FILTER (WHERE v.hub = m.hub AND v.date >= e.timestamp - INTERVAL '7 days') AS home_events_7d, COUNT(v.id) FILTER (WHERE v.hub <> m.hub AND v.date >= e.timestamp - INTERVAL '7 days') AS away_events_7d, COUNT(v.id) FILTER (WHERE v.hub = m.hub AND v.date >= e.timestamp - INTERVAL '30 days')*1.0/NULLIF(COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days'), 0) AS home_share_30d FROM eval_table e LEFT JOIN entity m ON m.id = e.entity_id LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "home_events_7d",
+    "home_share_30d"
+   ]
+  },
+  {
+   "id": "p11/home_context",
+   "sql": "SELECT e.entity_id, e.timestamp, MAX(m.x) AS entity_x, MAX(h.x) AS home_hub_x, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS peer_events_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days')*1.0/NULLIF(COUNT(v.id) FILTER (WHERE v.date < e.timestamp - INTERVAL '7 days'), 0) AS peer_week_ratio, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS active_peers_7d FROM eval_table e LEFT JOIN entity m ON m.id = e.entity_id LEFT JOIN hub h ON h.id = m.hub LEFT JOIN event v ON v.hub = m.hub AND v.entity <> e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '14 days' GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "peer_week_ratio",
+    "active_peers_7d"
+   ]
+  },
+  {
+   "id": "p11/optional_x1",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x1) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS x1_mean_7d, AVG(v.x1) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x1_mean_30d, ARG_MAX(v.x1, STRUCT_PACK(t := v.date, i := v.id)) AS x1_last_nonnull, REGR_SLOPE(v.x1, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x1_slope_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x1_mean_7d",
+    "x1_slope_30d"
+   ]
+  },
+  {
+   "id": "p12/gap_distribution",
+   "sql": "WITH history AS (SELECT e.entity_id, e.timestamp, v.id, v.date, DATE_DIFF('second', LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id), v.date)/86400.0 AS gap_days FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp), stats AS (SELECT entity_id, timestamp, AVG(gap_days) AS gap_mean, MEDIAN(gap_days) AS gap_median, STDDEV_SAMP(gap_days) AS gap_std, MIN(gap_days) AS gap_min, MAX(gap_days) AS gap_max, ARG_MAX(gap_days, STRUCT_PACK(t := date, i := id)) AS last_gap FROM history GROUP BY entity_id, timestamp) SELECT e.entity_id, e.timestamp, s.gap_mean, s.gap_median, s.gap_std, s.gap_min, s.gap_max, s.last_gap FROM eval_table e LEFT JOIN stats s ON s.entity_id = e.entity_id AND s.timestamp = e.timestamp",
+   "columns": [
+    "gap_min"
+   ]
+  },
+  {
+   "id": "p12/cadence_change",
+   "sql": "WITH history AS (SELECT e.entity_id, e.timestamp, v.id, v.date, DATE_DIFF('second', LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id), v.date)/86400.0 AS gap_days, ROW_NUMBER() OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date DESC, v.id DESC) AS rn FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp), stats AS (SELECT entity_id, timestamp, AVG(gap_days) FILTER (WHERE date >= timestamp - INTERVAL '30 days') AS gap_mean_30d, AVG(gap_days) FILTER (WHERE date >= timestamp - INTERVAL '90 days') AS gap_mean_90d, AVG(gap_days) FILTER (WHERE rn <= 3) AS gap_mean_last3, AVG(gap_days) FILTER (WHERE rn <= 3)/NULLIF(AVG(gap_days), 0) AS recent_gap_ratio, DATE_DIFF('second', MAX(date), timestamp)/86400.0/NULLIF(AVG(gap_days), 0) AS elapsed_to_mean_gap FROM history GROUP BY entity_id, timestamp) SELECT e.entity_id, e.timestamp, s.gap_mean_30d, s.gap_mean_90d, s.gap_mean_last3, s.recent_gap_ratio, s.elapsed_to_mean_gap FROM eval_table e LEFT JOIN stats s ON s.entity_id = e.entity_id AND s.timestamp = e.timestamp",
+   "columns": [
+    "gap_mean_90d",
+    "gap_mean_last3",
+    "recent_gap_ratio"
+   ]
+  },
+  {
+   "id": "p12/calendar_alignment",
+   "sql": "SELECT e.entity_id, e.timestamp, SIN(2*PI()*EXTRACT(DOW FROM e.timestamp)/7.0) AS cutoff_weekday_sin, COS(2*PI()*EXTRACT(DOW FROM e.timestamp)/7.0) AS cutoff_weekday_cos, AVG(COS(2*PI()*(EXTRACT(DOW FROM v.date)-EXTRACT(DOW FROM e.timestamp))/7.0)) AS historical_weekday_alignment, AVG(COS(2*PI()*(EXTRACT(HOUR FROM v.date)+EXTRACT(MINUTE FROM v.date)/60.0-EXTRACT(HOUR FROM e.timestamp)-EXTRACT(MINUTE FROM e.timestamp)/60.0)/24.0)) AS historical_hour_alignment, AVG(CASE WHEN v.id IS NOT NULL THEN CASE WHEN EXTRACT(DOW FROM v.date) IN (0,6) THEN 1.0 ELSE 0.0 END END) AS weekend_event_fraction FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "cutoff_weekday_sin",
+    "historical_weekday_alignment",
+    "historical_hour_alignment",
+    "weekend_event_fraction"
+   ]
+  },
+  {
+   "id": "p12/home_hub_activity",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS peer_hub_events_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS peer_hub_events_30d, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS peer_hub_entities_30d, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS days_since_peer_hub_event, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days')*1.0/NULLIF(COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '60 days' AND v.date < e.timestamp - INTERVAL '30 days'), 0) AS peer_hub_activity_ratio FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN event v ON v.hub = n.hub AND v.entity <> e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "days_since_peer_hub_event",
+    "peer_hub_activity_ratio"
+   ]
+  },
+  {
+   "id": "p12/available_label_history",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(l.entity_id) AS available_label_count, AVG(l.y) AS available_y_mean, FIRST(l.y ORDER BY l.date DESC, l.available_at DESC, l.hub DESC, l.y DESC) FILTER (WHERE l.entity_id IS NOT NULL) AS latest_available_y, STDDEV_SAMP(l.y) AS available_y_std, DATE_DIFF('second', MAX(l.available_at), e.timestamp)/86400.0 AS days_since_label_available FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "available_y_std"
+   ]
+  },
+  {
+   "id": "p12/event_x2",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x2) AS x2_mean, STDDEV_SAMP(v.x2) AS x2_std, FIRST(v.x2 ORDER BY v.date DESC, v.id DESC) FILTER (WHERE v.id IS NOT NULL) AS x2_last, AVG(v.x2) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days')-AVG(v.x2) AS x2_recent_shift FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x2_std"
+   ]
+  },
+  {
+   "id": "p13/hub_diversity",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(DISTINCT v.hub) AS hubs_all, COUNT(DISTINCT v.hub) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS hubs_1d, COUNT(DISTINCT v.hub) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS hubs_7d, COUNT(DISTINCT v.hub) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hubs_30d, COUNT(DISTINCT v.hub) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS hubs_90d, COUNT(DISTINCT v.hub) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') * 1.0 / NULLIF(COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days'), 0) AS hubs_per_event_30d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hubs_7d",
+    "hubs_per_event_30d"
+   ]
+  },
+  {
+   "id": "p13/hub_concentration",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(s.singletons, 0) AS singleton_hubs, COALESCE(s.repeat_hubs, 0) AS repeat_hubs, s.top_share, s.hhi, s.entropy FROM eval_table e LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE n = 1) AS singletons, COUNT(*) FILTER (WHERE n > 1) AS repeat_hubs, MAX(n)*1.0/NULLIF(SUM(n),0) AS top_share, SUM(n*1.0*n)/NULLIF(SUM(n)*1.0*SUM(n),0) AS hhi, LN(SUM(n)) - SUM(n*LN(n))/NULLIF(SUM(n),0) AS entropy FROM (SELECT v.hub, COUNT(*) AS n FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp GROUP BY v.hub) h) s ON TRUE",
+   "columns": [
+    "repeat_hubs",
+    "top_share",
+    "hhi",
+    "entropy"
+   ]
+  },
+  {
+   "id": "p13/hub_discovery",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(h.hub) FILTER (WHERE h.first_seen >= e.timestamp - INTERVAL '7 days') AS new_hubs_7d, COUNT(h.hub) FILTER (WHERE h.first_seen >= e.timestamp - INTERVAL '30 days') AS new_hubs_30d, COUNT(h.hub) FILTER (WHERE h.last_seen >= e.timestamp - INTERVAL '7 days' AND h.first_seen < e.timestamp - INTERVAL '7 days') AS returning_hubs_7d, COUNT(h.hub) FILTER (WHERE h.last_seen >= e.timestamp - INTERVAL '30 days' AND h.first_seen < e.timestamp - INTERVAL '30 days') AS returning_hubs_30d, DATE_DIFF('second', MAX(h.first_seen), e.timestamp)/86400.0 AS last_discovery_age FROM eval_table e LEFT JOIN LATERAL (SELECT v.hub, MIN(v.date) AS first_seen, MAX(v.date) AS last_seen FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp GROUP BY v.hub) h ON TRUE GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "new_hubs_7d",
+    "new_hubs_30d",
+    "returning_hubs_7d",
+    "returning_hubs_30d",
+    "last_discovery_age"
+   ]
+  },
+  {
+   "id": "p13/event_sequence",
+   "sql": "WITH seq AS (SELECT e.entity_id, e.timestamp, v.id, v.hub, v.date, LAG(v.hub) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS previous_hub, LAG(v.date) OVER (PARTITION BY e.entity_id, e.timestamp ORDER BY v.date, v.id) AS previous_date FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp) SELECT entity_id, timestamp, AVG(CASE WHEN previous_date IS NOT NULL THEN CASE WHEN hub <> previous_hub THEN 1.0 ELSE 0.0 END END) AS switch_rate, AVG(CASE WHEN previous_date IS NOT NULL AND date >= timestamp - INTERVAL '30 days' THEN CASE WHEN hub <> previous_hub THEN 1.0 ELSE 0.0 END END) AS switch_rate_30d, AVG(DATE_DIFF('second', previous_date, date)/86400.0) AS mean_gap_days, STDDEV_POP(DATE_DIFF('second', previous_date, date)/86400.0) AS gap_std_days, MAX(DATE_DIFF('second', previous_date, date)/86400.0) AS max_gap_days FROM seq GROUP BY entity_id, timestamp",
+   "columns": [
+    "switch_rate",
+    "switch_rate_30d"
+   ]
+  },
+  {
+   "id": "p13/recent_hub_distribution",
+   "sql": "SELECT e.entity_id, e.timestamp, s.top_share_30d, s.entropy_30d, COALESCE(s.singleton_hubs_30d,0) AS singleton_hubs_30d, s.mean_hub_age, s.min_hub_age FROM eval_table e LEFT JOIN LATERAL (SELECT MAX(n)*1.0/NULLIF(SUM(n),0) AS top_share_30d, LN(SUM(n))-SUM(n*LN(n))/NULLIF(SUM(n),0) AS entropy_30d, COUNT(*) FILTER (WHERE n=1) AS singleton_hubs_30d, AVG(DATE_DIFF('second', last_seen, e.timestamp)/86400.0) AS mean_hub_age, MIN(DATE_DIFF('second', last_seen, e.timestamp)/86400.0) AS min_hub_age FROM (SELECT v.hub, COUNT(*) AS n, MAX(v.date) AS last_seen FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days' GROUP BY v.hub) q) s ON TRUE",
+   "columns": [
+    "top_share_30d",
+    "entropy_30d",
+    "singleton_hubs_30d",
+    "mean_hub_age",
+    "min_hub_age"
+   ]
+  },
+  {
+   "id": "p13/hub_environment",
+   "sql": "SELECT e.entity_id, e.timestamp, s.mean_hub_x, s.std_hub_x, s.mean_other_entities_30d, s.max_other_entities_30d, s.mean_other_events_30d FROM eval_table e LEFT JOIN LATERAL (SELECT AVG(h.x) AS mean_hub_x, STDDEV_POP(h.x) AS std_hub_x, AVG(p.other_entities) AS mean_other_entities_30d, MAX(p.other_entities) AS max_other_entities_30d, AVG(p.other_events) AS mean_other_events_30d FROM (SELECT DISTINCT v.hub FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days') visited LEFT JOIN hub h ON h.id=visited.hub LEFT JOIN LATERAL (SELECT COUNT(DISTINCT w.entity) AS other_entities, COUNT(*) AS other_events FROM event w WHERE w.hub=visited.hub AND w.entity<>e.entity_id AND w.date<e.timestamp AND w.date>=e.timestamp-INTERVAL '30 days') p ON TRUE) s ON TRUE",
+   "columns": [
+    "mean_hub_x",
+    "std_hub_x",
+    "mean_other_entities_30d",
+    "max_other_entities_30d",
+    "mean_other_events_30d"
+   ]
+  },
+  {
+   "id": "p14/timing",
+   "sql": "SELECT e.entity_id, e.timestamp, DATE_DIFF('second', MAX(v.date), e.timestamp)/86400.0 AS days_since_last_event, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS history_age_days, DATE_DIFF('second', MIN(v.date), MAX(v.date))/86400.0 / NULLIF(COUNT(v.id)-1,0) AS mean_event_spacing_days, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') / NULLIF(COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') / 30.0 * 7.0,0) AS activity_7d_vs_30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') / NULLIF(COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') / 3.0,0) AS activity_30d_vs_90d FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "activity_7d_vs_30d",
+    "activity_30d_vs_90d"
+   ]
+  },
+  {
+   "id": "p14/discovery_history",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(h.hub) FILTER (WHERE h.first_date >= e.timestamp - INTERVAL '7 days') AS new_hubs_7d, COUNT(h.hub) FILTER (WHERE h.first_date >= e.timestamp - INTERVAL '30 days') AS new_hubs_30d, COUNT(h.hub) FILTER (WHERE h.first_date >= e.timestamp - INTERVAL '90 days') AS new_hubs_90d, DATE_DIFF('second', MAX(h.first_date), e.timestamp)/86400.0 AS days_since_new_hub, COUNT(h.hub) / NULLIF(SUM(h.n),0)::DOUBLE AS lifetime_discovery_fraction FROM eval_table e LEFT JOIN LATERAL (SELECT v.hub, MIN(v.date) AS first_date, COUNT(*) AS n FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp GROUP BY v.hub) h ON TRUE GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "new_hubs_90d",
+    "lifetime_discovery_fraction"
+   ]
+  },
+  {
+   "id": "p14/discovery_persistence",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(h.hub) FILTER (WHERE h.n = 1) AS singleton_hubs, COUNT(h.hub) FILTER (WHERE h.n = 1) / NULLIF(COUNT(h.hub),0)::DOUBLE AS singleton_hub_fraction, COUNT(h.hub) FILTER (WHERE h.first_date >= e.timestamp - INTERVAL '30 days') / NULLIF(SUM(h.n30),0)::DOUBLE AS discovery_fraction_30d, SUM(h.n30) FILTER (WHERE h.first_date < e.timestamp - INTERVAL '30 days') / NULLIF(SUM(h.n30),0)::DOUBLE AS established_hub_share_30d, COUNT(h.hub) FILTER (WHERE h.last_date < e.timestamp - INTERVAL '90 days') AS dormant_hubs_90d FROM eval_table e LEFT JOIN LATERAL (SELECT v.hub, MIN(v.date) AS first_date, MAX(v.date) AS last_date, COUNT(*) AS n, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS n30 FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp GROUP BY v.hub) h ON TRUE GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "singleton_hub_fraction",
+    "discovery_fraction_30d",
+    "established_hub_share_30d",
+    "dormant_hubs_90d"
+   ]
+  },
+  {
+   "id": "p14/home_and_travel",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.hub = a.hub) / NULLIF(COUNT(v.id),0)::DOUBLE AS home_event_share, COUNT(v.id) FILTER (WHERE v.hub <> a.hub AND v.date >= e.timestamp - INTERVAL '30 days') / NULLIF(COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days'),0)::DOUBLE AS away_share_30d, COUNT(DISTINCT v.hub) FILTER (WHERE v.hub <> a.hub) AS away_hubs_total, DATE_DIFF('second', MAX(v.date) FILTER (WHERE v.hub <> a.hub), e.timestamp)/86400.0 AS days_since_away_event, CAST(COUNT(v.id) FILTER (WHERE v.hub = a.hub) = 0 AS INTEGER) AS home_never_touched FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "away_share_30d",
+    "days_since_away_event",
+    "home_never_touched"
+   ]
+  },
+  {
+   "id": "p14/recent_sequence",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(t.id) FILTER (WHERE t.hub <> t.previous_hub) / NULLIF(COUNT(t.previous_hub),0)::DOUBLE AS switch_fraction_30d, AVG(t.gap_days) AS mean_gap_30d, STDDEV_SAMP(t.gap_days) AS gap_stddev_30d, AVG(t.gap_days) FILTER (WHERE t.hub <> t.previous_hub) AS switch_gap_days_30d, COUNT(t.id) FILTER (WHERE t.previous_hub IS NOT NULL AND t.hub <> t.previous_hub AND t.date >= e.timestamp - INTERVAL '7 days') AS switches_7d FROM eval_table e LEFT JOIN LATERAL (SELECT v.id, v.hub, v.date, p.hub AS previous_hub, DATE_DIFF('second', p.date, v.date)/86400.0 AS gap_days FROM event v LEFT JOIN LATERAL (SELECT q.hub, q.date FROM event q WHERE q.entity = e.entity_id AND q.date < e.timestamp AND (q.date < v.date OR (q.date = v.date AND q.id < v.id)) ORDER BY q.date DESC, q.id DESC LIMIT 1) p ON TRUE WHERE v.entity = e.entity_id AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days') t ON TRUE GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "gap_stddev_30d",
+    "switches_7d"
+   ]
+  },
+  {
+   "id": "p14/unseen_opportunities",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(u.hub) AS active_unseen_hubs_30d, COALESCE(SUM(u.n7),0) AS unseen_hub_events_7d, COALESCE(SUM(u.n30),0) AS unseen_hub_events_30d, MAX(u.visitors) AS largest_unseen_hub_visitors_30d, COUNT(u.hub) FILTER (WHERE u.first_date >= e.timestamp - INTERVAL '30 days') AS newly_active_unseen_hubs_30d FROM eval_table e LEFT JOIN LATERAL (SELECT v.hub, MIN(v.date) AS first_date, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS n7, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS n30, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS visitors FROM event v WHERE v.date < e.timestamp AND NOT EXISTS (SELECT 1 FROM event own WHERE own.entity = e.entity_id AND own.hub = v.hub AND own.date < e.timestamp) GROUP BY v.hub HAVING COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') > 0) u ON TRUE GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "active_unseen_hubs_30d",
+    "unseen_hub_events_7d",
+    "unseen_hub_events_30d",
+    "largest_unseen_hub_visitors_30d"
+   ]
+  },
+  {
+   "id": "p14/event_signal_x0",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) AS x0_mean, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_mean_30d, STDDEV_SAMP(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS x0_stddev_30d, ARG_MAX(v.x0, STRUCT_PACK(d := v.date, i := v.id)) AS x0_last, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') - AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS x0_recent_shift FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "x0_recent_shift"
+   ]
+  },
+  {
+   "id": "p14/available_labels",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(l.y) AS observed_label_count, AVG(l.y) AS observed_label_mean, AVG(l.y) FILTER (WHERE l.date >= e.timestamp - INTERVAL '90 days') AS observed_label_mean_90d, ARG_MAX(l.y, STRUCT_PACK(d := l.date, a := l.available_at)) AS latest_observed_label, DATE_DIFF('second', MAX(l.date), e.timestamp)/86400.0 AS latest_label_age_days FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp AND l.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "observed_label_mean_90d"
+   ]
+  },
+  {
+   "id": "p14/static_context",
+   "sql": "SELECT e.entity_id, e.timestamp, a.x AS entity_x, h.x AS home_hub_x, a.x - h.x AS entity_home_x_difference FROM eval_table e LEFT JOIN entity a ON a.id = e.entity_id LEFT JOIN hub h ON h.id = a.hub",
+   "columns": [
+    "entity_home_x_difference"
+   ]
+  },
+  {
+   "id": "p14/peer_frontier",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(f.hub) AS peer_unseen_hubs, COALESCE(SUM(f.peer_count),0) AS peer_unseen_links, MAX(f.peer_count) AS strongest_unseen_peer_support, COUNT(f.hub) FILTER (WHERE f.last_date >= e.timestamp - INTERVAL '7 days') AS peer_unseen_hubs_active_7d, DATE_DIFF('second', MAX(f.last_date), e.timestamp)/86400.0 AS freshest_peer_unseen_age_days FROM eval_table e LEFT JOIN LATERAL (SELECT d.hub, COUNT(DISTINCT d.entity) AS peer_count, MAX(d.date) AS last_date FROM event d JOIN (SELECT DISTINCT p.entity FROM event p WHERE p.date < e.timestamp AND p.date >= e.timestamp - INTERVAL '90 days' AND p.entity <> e.entity_id AND EXISTS (SELECT 1 FROM event own WHERE own.entity = e.entity_id AND own.hub = p.hub AND own.date < e.timestamp AND own.date >= e.timestamp - INTERVAL '90 days')) peers ON peers.entity = d.entity WHERE d.date < e.timestamp AND d.date >= e.timestamp - INTERVAL '30 days' AND NOT EXISTS (SELECT 1 FROM event seen WHERE seen.entity = e.entity_id AND seen.hub = d.hub AND seen.date < e.timestamp) GROUP BY d.hub) f ON TRUE GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "peer_unseen_hubs",
+    "peer_unseen_links",
+    "strongest_unseen_peer_support",
+    "peer_unseen_hubs_active_7d",
+    "freshest_peer_unseen_age_days"
+   ]
+  },
+  {
+   "id": "p15/hub_event_volume",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS hub_events_all, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS hub_events_1d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS hub_events_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_events_30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS hub_events_90d, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS hub_history_days FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN event v ON v.hub = t.hub AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_events_1d",
+    "hub_events_7d",
+    "hub_history_days"
+   ]
+  },
+  {
+   "id": "p15/hub_distinct_volume",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(DISTINCT v.entity) AS hub_entities_all, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS hub_entities_1d, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS hub_entities_7d, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_entities_30d, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS hub_entities_90d, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '180 days') AS hub_entities_180d FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN event v ON v.hub = t.hub AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_entities_1d",
+    "hub_entities_7d"
+   ]
+  },
+  {
+   "id": "p15/hub_activity_trends",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days' AND v.date < e.timestamp - INTERVAL '7 days') AS hub_entities_prev7d, COUNT(DISTINCT v.entity) FILTER (WHERE v.date >= e.timestamp - INTERVAL '60 days' AND v.date < e.timestamp - INTERVAL '30 days') AS hub_entities_prev30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days' AND v.date < e.timestamp - INTERVAL '7 days') AS hub_events_prev7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '60 days' AND v.date < e.timestamp - INTERVAL '30 days') AS hub_events_prev30d, COUNT(DISTINCT CAST(v.date AS DATE)) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_active_days_30d FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN event v ON v.hub = t.hub AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_entities_prev7d",
+    "hub_entities_prev30d",
+    "hub_events_prev7d",
+    "hub_events_prev30d",
+    "hub_active_days_30d"
+   ]
+  },
+  {
+   "id": "p15/hub_visitor_recency",
+   "sql": "SELECT e.entity_id, e.timestamp, a.* FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN LATERAL (SELECT MIN(DATE_DIFF('second', s.last_date, e.timestamp)/86400.0) AS hub_last_event_age, AVG(EXP(-DATE_DIFF('second', s.last_date, e.timestamp)/86400.0/7.0)) AS hub_mean_recency_weight_7d, SUM(EXP(-DATE_DIFF('second', s.last_date, e.timestamp)/86400.0/7.0)) AS hub_recency_mass_7d, SUM(EXP(-DATE_DIFF('second', s.last_date, e.timestamp)/86400.0/30.0)) AS hub_recency_mass_30d, COUNT(*) FILTER (WHERE s.last_date < e.timestamp - INTERVAL '30 days' AND s.last_date >= e.timestamp - INTERVAL '90 days') AS hub_dormant_entities_30_90d FROM (SELECT v.entity, MAX(v.date) AS last_date FROM event v WHERE v.hub = t.hub AND v.date < e.timestamp GROUP BY v.entity) s) a ON TRUE",
+   "columns": [
+    "hub_mean_recency_weight_7d",
+    "hub_recency_mass_7d",
+    "hub_recency_mass_30d",
+    "hub_dormant_entities_30_90d"
+   ]
+  },
+  {
+   "id": "p15/hub_visitor_retention",
+   "sql": "SELECT e.entity_id, e.timestamp, a.* FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE s.first_date >= e.timestamp - INTERVAL '7 days') AS hub_new_entities_7d, COUNT(*) FILTER (WHERE s.first_date >= e.timestamp - INTERVAL '30 days') AS hub_new_entities_30d, COUNT(*) FILTER (WHERE s.n30 >= 2) AS hub_repeat_entities_30d, COUNT(*) FILTER (WHERE s.recent7 > 0 AND s.previous7 > 0) AS hub_retained_entities_7d, SUM(s.n30 * s.n30)/NULLIF(SUM(s.n30)*SUM(s.n30), 0) AS hub_event_concentration_30d FROM (SELECT v.entity, MIN(v.date) AS first_date, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days')::DOUBLE AS n30, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS recent7, COUNT(*) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days' AND v.date < e.timestamp - INTERVAL '7 days') AS previous7 FROM event v WHERE v.hub = t.hub AND v.date < e.timestamp GROUP BY v.entity) s) a ON TRUE",
+   "columns": [
+    "hub_new_entities_7d",
+    "hub_new_entities_30d",
+    "hub_repeat_entities_30d",
+    "hub_retained_entities_7d",
+    "hub_event_concentration_30d"
+   ]
+  },
+  {
+   "id": "p15/hub_population_mix",
+   "sql": "SELECT e.entity_id, e.timestamp, a.* FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN LATERAL (SELECT COUNT(DISTINCT v.entity) FILTER (WHERE p.hub = t.hub) AS hub_local_entities_30d, COUNT(DISTINCT v.entity) FILTER (WHERE p.hub <> t.hub) AS hub_external_entities_30d, COUNT(DISTINCT p.hub) AS hub_origin_hubs_30d, AVG(p.x) AS hub_visitor_entity_x_mean_30d, COUNT(v.id) FILTER (WHERE p.hub <> t.hub)::DOUBLE/NULLIF(COUNT(v.id), 0) AS hub_external_event_fraction_30d FROM event v LEFT JOIN entity p ON p.id = v.entity WHERE v.hub = t.hub AND v.date < e.timestamp AND v.date >= e.timestamp - INTERVAL '30 days') a ON TRUE",
+   "columns": [
+    "hub_local_entities_30d",
+    "hub_visitor_entity_x_mean_30d",
+    "hub_external_event_fraction_30d"
+   ]
+  },
+  {
+   "id": "p15/hub_x0_signals",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS hub_x0_mean_7d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_x0_mean_30d, STDDEV_POP(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_x0_std_30d, SUM(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_x0_sum_30d, CORR(v.x0, DATE_DIFF('second', v.date, e.timestamp)/86400.0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS hub_x0_age_corr_90d FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN event v ON v.hub = t.hub AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_x0_mean_7d",
+    "hub_x0_std_30d",
+    "hub_x0_age_corr_90d"
+   ]
+  },
+  {
+   "id": "p15/hub_label_dynamics",
+   "sql": "SELECT e.entity_id, e.timestamp, STDDEV_POP(l.y) AS hub_y_std_all, AVG(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '7 days') AS hub_y_mean_available_7d, AVG(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '60 days' AND l.available_at < e.timestamp - INTERVAL '30 days') AS hub_y_mean_available_prev30d, REGR_SLOPE(l.y, DATE_DIFF('second', e.timestamp, l.date)/86400.0) FILTER (WHERE l.date < e.timestamp AND l.date >= e.timestamp - INTERVAL '90 days') AS hub_y_trend_90d FROM eval_table e LEFT JOIN entity t ON t.id = e.entity_id LEFT JOIN labels l ON l.hub = t.hub AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_y_mean_available_prev30d",
+    "hub_y_trend_90d"
+   ]
+  },
+  {
+   "id": "p16/hub_event_counts",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '1 day') AS hub_events_1d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '3 days') AS hub_events_3d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS hub_events_7d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '14 days') AS hub_events_14d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS hub_events_30d, COUNT(v.id) FILTER (WHERE v.date >= e.timestamp - INTERVAL '90 days') AS hub_events_90d FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN event v ON v.hub = n.hub AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_events_3d",
+    "hub_events_14d"
+   ]
+  },
+  {
+   "id": "p16/hub_recency",
+   "sql": "SELECT e.entity_id, e.timestamp, MIN(DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS hub_last_event_age, LIST_EXTRACT(LIST(DATE_DIFF('second', v.date, e.timestamp)/86400.0 ORDER BY v.date DESC) FILTER (WHERE v.id IS NOT NULL), 2) AS hub_second_event_age, LIST_EXTRACT(LIST(DATE_DIFF('second', v.date, e.timestamp)/86400.0 ORDER BY v.date DESC) FILTER (WHERE v.id IS NOT NULL), 3) AS hub_third_event_age, MAX(DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS hub_oldest_event_age, DATE_DIFF('second', MIN(v.date), MAX(v.date))/86400.0/NULLIF(COUNT(v.id)-1,0) AS hub_mean_interevent_days FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN event v ON v.hub = n.hub AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "hub_second_event_age",
+    "hub_third_event_age",
+    "hub_oldest_event_age",
+    "hub_mean_interevent_days"
+   ]
+  },
+  {
+   "id": "p16/hub_rate_changes",
+   "sql": "SELECT e.entity_id, e.timestamp, (a.c1+0.5)/(a.p6/6.0+0.5) AS hub_rate_1_vs_prior6, (a.c7+0.5)/(a.p7+0.5) AS hub_rate_7_vs_prior7, (a.c7/7.0+0.1)/(a.p23/23.0+0.1) AS hub_rate_7_vs_prior23, (a.c30/30.0+0.1)/(a.p60/60.0+0.1) AS hub_rate_30_vs_prior60, a.c7/7.0-a.p23/23.0 AS hub_daily_rate_change FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '1 day') AS c1, COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days' AND v.date < e.timestamp-INTERVAL '1 day') AS p6, COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS c7, COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '14 days' AND v.date < e.timestamp-INTERVAL '7 days') AS p7, COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '30 days' AND v.date < e.timestamp-INTERVAL '7 days') AS p23, COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '30 days') AS c30, COUNT(*) FILTER (WHERE v.date < e.timestamp-INTERVAL '30 days') AS p60 FROM event v WHERE v.hub=n.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '90 days') a ON TRUE",
+   "columns": [
+    "hub_rate_1_vs_prior6",
+    "hub_rate_7_vs_prior7",
+    "hub_rate_7_vs_prior23",
+    "hub_rate_30_vs_prior60",
+    "hub_daily_rate_change"
+   ]
+  },
+  {
+   "id": "p16/hub_daily_occupancy",
+   "sql": "SELECT e.entity_id, e.timestamp, a.active7 AS hub_active_days_7d, a.active30 AS hub_active_days_30d, a.active90 AS hub_active_days_90d, a.peak AS hub_peak_daily_count_90d, COALESCE(a.squares,0)/90.0-POWER(COALESCE(a.total,0)/90.0,2) AS hub_daily_count_variance_90d FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE d.age_day < 7) AS active7, COUNT(*) FILTER (WHERE d.age_day < 30) AS active30, COUNT(*) AS active90, COALESCE(MAX(d.c),0) AS peak, SUM(d.c*d.c) AS squares, SUM(d.c) AS total FROM (SELECT FLOOR(DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS age_day, COUNT(*) AS c FROM event v WHERE v.hub=n.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '90 days' GROUP BY FLOOR(DATE_DIFF('second',v.date,e.timestamp)/86400.0)) d) a ON TRUE",
+   "columns": [
+    "hub_active_days_7d",
+    "hub_active_days_30d",
+    "hub_active_days_90d",
+    "hub_peak_daily_count_90d",
+    "hub_daily_count_variance_90d"
+   ]
+  },
+  {
+   "id": "p16/hub_actor_diversity",
+   "sql": "SELECT e.entity_id, e.timestamp, a.actors7 AS hub_unique_actors_7d, a.actors30 AS hub_unique_actors_30d, a.actors90 AS hub_unique_actors_90d, a.largest30/NULLIF(a.total30,0)::DOUBLE AS hub_top_actor_share_30d, a.squares30/NULLIF(a.total30*a.total30,0)::DOUBLE AS hub_actor_concentration_30d FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN LATERAL (SELECT COUNT(*) FILTER (WHERE d.c7>0) AS actors7, COUNT(*) FILTER (WHERE d.c30>0) AS actors30, COUNT(*) AS actors90, MAX(d.c30) AS largest30, SUM(d.c30) AS total30, SUM(d.c30*d.c30) AS squares30 FROM (SELECT v.entity, COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS c7, COUNT(*) FILTER (WHERE v.date >= e.timestamp-INTERVAL '30 days') AS c30 FROM event v WHERE v.hub=n.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '90 days' GROUP BY v.entity) d) a ON TRUE",
+   "columns": [
+    "hub_top_actor_share_30d"
+   ]
+  },
+  {
+   "id": "p16/hub_x0_history",
+   "sql": "SELECT e.entity_id,e.timestamp,AVG(v.x0) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS hub_x0_mean_7d, AVG(v.x0) AS hub_x0_mean_30d, STDDEV_POP(v.x0) AS hub_x0_sd_30d, FIRST(v.x0 ORDER BY v.date DESC,v.id DESC) FILTER (WHERE v.id IS NOT NULL) AS hub_x0_latest_30d, REGR_SLOPE(v.x0,-DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS hub_x0_daily_slope_30d FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN event v ON v.hub=n.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_x0_latest_30d",
+    "hub_x0_daily_slope_30d"
+   ]
+  },
+  {
+   "id": "p16/hub_x1_history",
+   "sql": "SELECT e.entity_id,e.timestamp,AVG(v.x1) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS hub_x1_mean_7d, AVG(v.x1) AS hub_x1_mean_30d, STDDEV_POP(v.x1) AS hub_x1_sd_30d, FIRST(v.x1 ORDER BY v.date DESC,v.id DESC) FILTER (WHERE v.x1 IS NOT NULL) AS hub_x1_latest_30d, REGR_SLOPE(v.x1,-DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS hub_x1_daily_slope_30d FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN event v ON v.hub=n.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_x1_mean_7d",
+    "hub_x1_mean_30d",
+    "hub_x1_sd_30d",
+    "hub_x1_latest_30d",
+    "hub_x1_daily_slope_30d"
+   ]
+  },
+  {
+   "id": "p16/hub_x2_history",
+   "sql": "SELECT e.entity_id,e.timestamp,AVG(v.x2) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS hub_x2_mean_7d, AVG(v.x2) AS hub_x2_mean_30d, STDDEV_POP(v.x2) AS hub_x2_sd_30d, FIRST(v.x2 ORDER BY v.date DESC,v.id DESC) FILTER (WHERE v.x2 IS NOT NULL) AS hub_x2_latest_30d, REGR_SLOPE(v.x2,-DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS hub_x2_daily_slope_30d FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN event v ON v.hub=n.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_x2_mean_7d",
+    "hub_x2_mean_30d",
+    "hub_x2_sd_30d",
+    "hub_x2_latest_30d",
+    "hub_x2_daily_slope_30d"
+   ]
+  },
+  {
+   "id": "p17/hub_volume_windows",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(a.s1,0) AS hub_x0_1d, COALESCE(a.s7,0) AS hub_x0_7d, COALESCE(a.s30,0) AS hub_x0_30d, COALESCE(a.s90,0) AS hub_x0_90d, COALESCE(a.n7,0) AS hub_events_7d, COALESCE(a.n30,0) AS hub_events_30d FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '1 day') AS s1, SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS s7, SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS s30, SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS s90, COUNT(*) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS n7, COUNT(*) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS n30 FROM event v WHERE v.hub=t.hub AND v.date<e.timestamp) a ON TRUE",
+   "columns": [
+    "hub_x0_1d",
+    "hub_x0_7d"
+   ]
+  },
+  {
+   "id": "p17/hub_decay_and_recency",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(a.d3,0) AS hub_x0_decay_3d, COALESCE(a.d14,0) AS hub_x0_decay_14d, COALESCE(a.d60,0) AS hub_x0_decay_60d, a.last_age AS hub_last_event_age_days, a.history_age AS hub_history_age_days FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT SUM(v.x0*EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/3.0)) AS d3, SUM(v.x0*EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/14.0)) AS d14, SUM(v.x0*EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/60.0)) AS d60, DATE_DIFF('second',MAX(v.date),e.timestamp)/86400.0 AS last_age, DATE_DIFF('second',MIN(v.date),e.timestamp)/86400.0 AS history_age FROM event v WHERE v.hub=t.hub AND v.date<e.timestamp) a ON TRUE",
+   "columns": [
+    "hub_x0_decay_3d",
+    "hub_x0_decay_14d",
+    "hub_x0_decay_60d"
+   ]
+  },
+  {
+   "id": "p17/hub_event_distribution",
+   "sql": "SELECT e.entity_id, e.timestamp, a.mean_x0 AS hub_mean_x0_90d, a.sd_x0 AS hub_sd_x0_90d, a.median_x0 AS hub_median_x0_90d, a.q90_x0 AS hub_q90_x0_90d, a.abs_x0 AS hub_abs_x0_30d FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT AVG(v.x0) AS mean_x0, STDDEV_POP(v.x0) AS sd_x0, MEDIAN(v.x0) AS median_x0, QUANTILE_CONT(v.x0,0.9) AS q90_x0, SUM(ABS(v.x0)) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS abs_x0 FROM event v WHERE v.hub=t.hub AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '90 days') a ON TRUE",
+   "columns": [
+    "hub_sd_x0_90d",
+    "hub_median_x0_90d",
+    "hub_q90_x0_90d",
+    "hub_abs_x0_30d"
+   ]
+  },
+  {
+   "id": "p17/hub_rate_changes",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(a.s7,0)/7.0-COALESCE(a.p7,0)/7.0 AS hub_x0_daily_change_7d, COALESCE(a.s30,0)/30.0-COALESCE(a.p30,0)/30.0 AS hub_x0_daily_change_30d, (a.n7/7.0)-(a.pn7/7.0) AS hub_event_daily_change_7d, a.m7-a.pm7 AS hub_mean_x0_change_7d, COALESCE(a.same_weekday,0)/4.0 AS hub_same_weekday_x0_mean FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS s7, SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '14 days' AND v.date<e.timestamp-INTERVAL '7 days') AS p7, SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS s30, SUM(v.x0) FILTER (WHERE v.date<e.timestamp-INTERVAL '30 days') AS p30, COUNT(*) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS n7, COUNT(*) FILTER (WHERE v.date>=e.timestamp-INTERVAL '14 days' AND v.date<e.timestamp-INTERVAL '7 days') AS pn7, AVG(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS m7, AVG(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '14 days' AND v.date<e.timestamp-INTERVAL '7 days') AS pm7, SUM(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '28 days' AND EXTRACT(DOW FROM v.date)=EXTRACT(DOW FROM e.timestamp)) AS same_weekday FROM event v WHERE v.hub=t.hub AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '60 days') a ON TRUE",
+   "columns": [
+    "hub_x0_daily_change_7d",
+    "hub_x0_daily_change_30d",
+    "hub_event_daily_change_7d",
+    "hub_mean_x0_change_7d",
+    "hub_same_weekday_x0_mean"
+   ]
+  },
+  {
+   "id": "p17/hub_contributor_structure",
+   "sql": "SELECT e.entity_id, e.timestamp, a.n AS hub_active_entities_30d, a.repeat_n AS hub_repeat_entities_30d, a.max_events AS hub_largest_entity_events_30d, a.top_share AS hub_top_entity_abs_share_30d, a.hhi AS hub_entity_abs_hhi_30d FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE q.n>1) AS repeat_n, MAX(q.n) AS max_events, MAX(q.mass)/NULLIF(SUM(q.mass),0) AS top_share, SUM(q.mass*q.mass)/NULLIF(SUM(q.mass)*SUM(q.mass),0) AS hhi FROM (SELECT v.entity, COUNT(*) AS n, SUM(ABS(v.x0)) AS mass FROM event v WHERE v.hub=t.hub AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days' GROUP BY v.entity) q) a ON TRUE",
+   "columns": [
+    "hub_largest_entity_events_30d",
+    "hub_top_entity_abs_share_30d",
+    "hub_entity_abs_hhi_30d"
+   ]
+  },
+  {
+   "id": "p17/hub_home_and_visiting_flow",
+   "sql": "SELECT e.entity_id, e.timestamp, COALESCE(a.home_sum,0) AS hub_resident_x0_30d, COALESCE(a.visit_sum,0) AS hub_visitor_x0_30d, a.visitors AS hub_visiting_entities_30d, a.origins AS hub_origin_hubs_30d, a.visitor_fraction AS hub_visitor_event_fraction_30d FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT SUM(v.x0) FILTER (WHERE p.hub=t.hub) AS home_sum, SUM(v.x0) FILTER (WHERE p.hub<>t.hub) AS visit_sum, COUNT(DISTINCT v.entity) FILTER (WHERE p.hub<>t.hub) AS visitors, COUNT(DISTINCT p.hub) AS origins, COUNT(*) FILTER (WHERE p.hub<>t.hub)*1.0/NULLIF(COUNT(*),0) AS visitor_fraction FROM event v LEFT JOIN entity p ON p.id=v.entity WHERE v.hub=t.hub AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days') a ON TRUE",
+   "columns": [
+    "hub_resident_x0_30d"
+   ]
+  },
+  {
+   "id": "p17/hub_resident_supply",
+   "sql": "SELECT e.entity_id, e.timestamp, h.x AS hub_static_x, a.residents AS hub_resident_count, a.mean_x AS hub_resident_mean_x, COALESCE(b.s30,0) AS residents_all_destination_x0_30d, COALESCE(b.out30,0) AS residents_outbound_x0_30d FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN hub h ON h.id=t.hub LEFT JOIN LATERAL (SELECT COUNT(*) AS residents, AVG(p.x) AS mean_x FROM entity p WHERE p.hub=t.hub) a ON TRUE LEFT JOIN LATERAL (SELECT SUM(v.x0) AS s30, SUM(v.x0) FILTER (WHERE v.hub<>t.hub) AS out30 FROM event v JOIN entity p ON p.id=v.entity WHERE p.hub=t.hub AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days') b ON TRUE",
+   "columns": [
+    "residents_outbound_x0_30d"
+   ]
+  },
+  {
+   "id": "p17/hub_available_labels",
+   "sql": "SELECT e.entity_id, e.timestamp, a.mean30 AS hub_label_mean_available_30d, a.mean90 AS hub_label_mean_available_90d, a.sd90 AS hub_label_sd_available_90d, a.n90 AS hub_label_count_available_90d, a.age AS hub_last_label_availability_age_days FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT AVG(l.y) FILTER (WHERE l.available_at>=e.timestamp-INTERVAL '30 days') AS mean30, AVG(l.y) FILTER (WHERE l.available_at>=e.timestamp-INTERVAL '90 days') AS mean90, STDDEV_POP(l.y) FILTER (WHERE l.available_at>=e.timestamp-INTERVAL '90 days') AS sd90, COUNT(*) FILTER (WHERE l.available_at>=e.timestamp-INTERVAL '90 days') AS n90, DATE_DIFF('second',MAX(l.available_at),e.timestamp)/86400.0 AS age FROM labels l WHERE l.hub=t.hub AND l.available_at<e.timestamp AND l.date<e.timestamp) a ON TRUE",
+   "columns": [
+    "hub_label_sd_available_90d"
+   ]
+  },
+  {
+   "id": "p17/hub_optional_x1",
+   "sql": "SELECT e.entity_id, e.timestamp, a.mean7 AS hub_x1_mean_7d, a.mean30 AS hub_x1_mean_30d, a.sd30 AS hub_x1_sd_30d, a.corr30 AS hub_x1_x0_corr_30d, a.weighted30 AS hub_x1_abs_x0_weighted_30d FROM eval_table e LEFT JOIN entity t ON t.id=e.entity_id LEFT JOIN LATERAL (SELECT AVG(v.x1) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS mean7, AVG(v.x1) AS mean30, STDDEV_POP(v.x1) AS sd30, CORR(v.x1,v.x0) AS corr30, SUM(v.x1*ABS(v.x0))/NULLIF(SUM(ABS(v.x0)) FILTER (WHERE v.x1 IS NOT NULL),0) AS weighted30 FROM event v WHERE v.hub=t.hub AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days') a ON TRUE",
+   "columns": [
+    "hub_x1_x0_corr_30d",
+    "hub_x1_abs_x0_weighted_30d"
+   ]
+  },
+  {
+   "id": "p18/hub_history",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS hub_n, AVG(v.x0) AS hub_mean, STDDEV_SAMP(v.x0) AS hub_sd, COUNT(DISTINCT v.entity) AS hub_entities, DATE_DIFF('second', MIN(v.date), e.timestamp)/86400.0 AS hub_history_days, (SUM(v.x0)+10*COALESCE((SELECT AVG(g.x0) FROM event g WHERE g.date < e.timestamp),0))/(COUNT(v.x0)+10.0) AS hub_shrunk_mean FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN event v ON v.hub=a.hub AND v.date < e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_sd",
+    "hub_shrunk_mean"
+   ]
+  },
+  {
+   "id": "p18/hub_change",
+   "sql": "SELECT e.entity_id,e.timestamp,AVG(v.x0) FILTER (WHERE v.date >= e.timestamp-INTERVAL '1 day') AS hub_mean1,AVG(v.x0) FILTER (WHERE v.date >= e.timestamp-INTERVAL '14 days' AND v.date < e.timestamp-INTERVAL '7 days') AS hub_previous_week_mean,AVG(v.x0) FILTER (WHERE v.date < e.timestamp-INTERVAL '30 days') AS hub_previous_month_mean,REGR_SLOPE(v.x0,-DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS hub_slope60,COUNT(v.id) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days')/7.0-COUNT(v.id) FILTER (WHERE v.date >= e.timestamp-INTERVAL '30 days')/30.0 AS hub_rate_change FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN event v ON v.hub=a.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '60 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_mean1",
+    "hub_previous_week_mean",
+    "hub_previous_month_mean",
+    "hub_slope60"
+   ]
+  },
+  {
+   "id": "p18/hub_decay",
+   "sql": "SELECT e.entity_id,e.timestamp,DATE_DIFF('second',MAX(v.date),e.timestamp)/86400.0 AS hub_last_age,ARG_MAX(v.x0,v.date) AS hub_last_x0,SUM(v.x0*EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/7.0))/NULLIF(SUM(EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/7.0)),0) AS hub_decay7_mean,SUM(v.x0*EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/30.0))/NULLIF(SUM(EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/30.0)),0) AS hub_decay30_mean,SUM(EXP(-DATE_DIFF('second',v.date,e.timestamp)/86400.0/7.0)) AS hub_decay7_mass FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN event v ON v.hub=a.hub AND v.date < e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_last_x0",
+    "hub_decay7_mean",
+    "hub_decay30_mean",
+    "hub_decay7_mass"
+   ]
+  },
+  {
+   "id": "p18/hub_distribution",
+   "sql": "SELECT e.entity_id,e.timestamp,QUANTILE_CONT(v.x0,0.1) AS hub_q10_90,MEDIAN(v.x0) AS hub_median90,QUANTILE_CONT(v.x0,0.9) AS hub_q90_90,STDDEV_SAMP(v.x0) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS hub_sd7,STDDEV_SAMP(v.x0) FILTER (WHERE v.date >= e.timestamp-INTERVAL '30 days') AS hub_sd30 FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN event v ON v.hub=a.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '90 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_q10_90",
+    "hub_sd7"
+   ]
+  },
+  {
+   "id": "p18/hub_composition",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(DISTINCT v.entity) AS hub_entities30,COUNT(DISTINCT CAST(v.date AS DATE)) AS hub_active_days30,AVG(CASE WHEN v.id IS NOT NULL THEN CASE WHEN b.hub=v.hub THEN 1.0 ELSE 0.0 END END) AS hub_home_actor_share30,AVG(b.x) AS hub_actor_attribute30,AVG(v.x0) FILTER (WHERE b.hub<>v.hub) AS hub_visitor_mean30 FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN event v ON v.hub=a.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '30 days' LEFT JOIN entity b ON b.id=v.entity GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_home_actor_share30"
+   ]
+  },
+  {
+   "id": "p18/global_context",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(v.id) AS global_n30,AVG(v.x0) AS global_mean30,AVG(v.x0) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS global_mean7,COUNT(v.id) FILTER (WHERE v.hub=a.hub)*1.0/NULLIF(COUNT(v.id),0) AS hub_event_share30,AVG(v.x0) FILTER (WHERE v.hub=a.hub)-AVG(v.x0) AS hub_global_gap30 FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN event v ON v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "global_mean30",
+    "global_mean7",
+    "hub_event_share30",
+    "hub_global_gap30"
+   ]
+  },
+  {
+   "id": "p18/attributes_seasonality",
+   "sql": "SELECT e.entity_id,e.timestamp,MAX(a.x) AS entity_attribute,MAX(h.x) AS hub_attribute,AVG(v.x0) FILTER (WHERE EXTRACT(DOW FROM v.date)=EXTRACT(DOW FROM e.timestamp)) AS hub_same_weekday_mean,AVG(v.x0) FILTER (WHERE (EXTRACT(DOW FROM v.date) IN (0,6))=(EXTRACT(DOW FROM e.timestamp) IN (0,6))) AS hub_same_daytype_mean FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN hub h ON h.id=a.hub LEFT JOIN event v ON v.hub=a.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '90 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_same_weekday_mean",
+    "hub_same_daytype_mean"
+   ]
+  },
+  {
+   "id": "p18/hub_x1_context",
+   "sql": "SELECT e.entity_id,e.timestamp,AVG(v.x1) AS hub_x1_mean30,AVG(v.x1) FILTER (WHERE v.date >= e.timestamp-INTERVAL '7 days') AS hub_x1_mean7,STDDEV_SAMP(v.x1) AS hub_x1_sd30,CORR(v.x0,v.x1) AS hub_x0_x1_corr30,ARG_MAX(v.x1,v.date) AS hub_last_x1 FROM eval_table e LEFT JOIN entity a ON a.id=e.entity_id LEFT JOIN event v ON v.hub=a.hub AND v.date < e.timestamp AND v.date >= e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "hub_x1_sd30",
+    "hub_last_x1"
+   ]
+  },
+  {
+   "id": "p19/entity_label_history",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(l.y) AS entity_y_count, AVG(l.y) AS entity_y_mean, STDDEV_SAMP(l.y) AS entity_y_std, ARG_MAX(l.y, l.available_at) AS entity_y_last, MEDIAN(l.y) AS entity_y_median FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "entity_y_median"
+   ]
+  },
+  {
+   "id": "p19/entity_label_dynamics",
+   "sql": "SELECT e.entity_id, e.timestamp, REGR_SLOPE(l.y, -DATE_DIFF('second', l.available_at, e.timestamp)/86400.0) AS entity_y_trend, REGR_SLOPE(l.y, -DATE_DIFF('second', l.available_at, e.timestamp)/86400.0) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '90 days') AS entity_y_trend_90d, ARG_MAX(l.y, l.available_at) - AVG(l.y) AS entity_y_last_minus_mean, AVG(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '30 days') - AVG(l.y) FILTER (WHERE l.available_at < e.timestamp - INTERVAL '30 days' AND l.available_at >= e.timestamp - INTERVAL '90 days') AS entity_y_recent_change, STDDEV_SAMP(l.y) FILTER (WHERE l.available_at >= e.timestamp - INTERVAL '90 days') AS entity_y_std_90d FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "entity_y_trend",
+    "entity_y_trend_90d",
+    "entity_y_recent_change",
+    "entity_y_std_90d"
+   ]
+  },
+  {
+   "id": "p19/entity_label_timing",
+   "sql": "SELECT e.entity_id, e.timestamp, DATE_DIFF('second', MAX(l.available_at), e.timestamp)/86400.0 AS entity_label_available_age, DATE_DIFF('second', ARG_MAX(l.date, l.available_at), e.timestamp)/86400.0 AS entity_last_label_date_age, AVG(DATE_DIFF('second', l.date, l.available_at)/86400.0) AS entity_label_mean_delay, DATE_DIFF('second', MIN(l.available_at), MAX(l.available_at))/86400.0 AS entity_label_history_span, COUNT(l.y) / (1.0 + DATE_DIFF('second', MIN(l.available_at), e.timestamp)/86400.0) AS entity_label_daily_rate FROM eval_table e LEFT JOIN labels l ON l.entity_id = e.entity_id AND l.available_at < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "entity_label_history_span"
+   ]
+  },
+  {
+   "id": "p19/static_and_label_event_context",
+   "sql": "SELECT e.entity_id, e.timestamp, en.x AS entity_x, h.x AS home_hub_x, a.away_fraction AS event_away_fraction, a.post_label_count AS events_since_last_label, a.post_label_x0 AS event_x0_since_last_label FROM eval_table e LEFT JOIN entity en ON en.id = e.entity_id LEFT JOIN hub h ON h.id = en.hub LEFT JOIN LATERAL (SELECT MAX(l.available_at) AS last_available FROM labels l WHERE l.entity_id = e.entity_id AND l.available_at < e.timestamp) s ON TRUE LEFT JOIN LATERAL (SELECT AVG(CASE WHEN v.hub = en.hub THEN 0.0 WHEN v.hub IS NOT NULL AND en.hub IS NOT NULL THEN 1.0 END) AS away_fraction, COUNT(v.id) FILTER (WHERE v.date >= s.last_available) AS post_label_count, AVG(v.x0) FILTER (WHERE v.date >= s.last_available) AS post_label_x0 FROM event v WHERE v.entity = e.entity_id AND v.date < e.timestamp) a ON TRUE",
+   "columns": [
+    "events_since_last_label",
+    "event_x0_since_last_label"
+   ]
+  },
+  {
+   "id": "p19/entity_event_x2",
+   "sql": "SELECT e.entity_id, e.timestamp, AVG(v.x2) AS event_x2_mean, STDDEV_SAMP(v.x2) AS event_x2_std, ARG_MAX(v.x2, v.date) AS event_x2_last, AVG(v.x2) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS event_x2_mean_30d, REGR_SLOPE(v.x2, -DATE_DIFF('second', v.date, e.timestamp)/86400.0) AS event_x2_trend FROM eval_table e LEFT JOIN event v ON v.entity = e.entity_id AND v.date < e.timestamp GROUP BY e.entity_id, e.timestamp",
+   "columns": [
+    "event_x2_trend"
+   ]
+  },
+  {
+   "id": "p20/latest_matured_labels",
+   "sql": "SELECT e.entity_id, e.timestamp, l.ys[1] AS latest_y, l.ys[1]-l.ys[2] AS latest_y_delta, ABS(l.ys[1]-l.ys[2]) AS latest_y_abs_delta, DATE_DIFF('second',l.ds[1],e.timestamp)/86400.0 AS latest_label_age_days, DATE_DIFF('second',l.avs[1],e.timestamp)/86400.0 AS latest_label_available_age_days, DATE_DIFF('second',l.ds[1],l.avs[1])/86400.0 AS latest_label_maturation_days FROM eval_table e LEFT JOIN LATERAL (SELECT LIST(y ORDER BY date DESC,available_at DESC) AS ys, LIST(date ORDER BY date DESC,available_at DESC) AS ds, LIST(available_at ORDER BY date DESC,available_at DESC) AS avs FROM labels WHERE entity_id=e.entity_id AND available_at<e.timestamp) l ON TRUE",
+   "columns": [
+    "latest_y_delta",
+    "latest_y_abs_delta"
+   ]
+  },
+  {
+   "id": "p20/label_change_history",
+   "sql": "WITH history AS (SELECT e.entity_id,e.timestamp,l.date,l.y,LAG(l.y) OVER (PARTITION BY e.entity_id,e.timestamp ORDER BY l.date,l.available_at) AS prev_y FROM eval_table e LEFT JOIN labels l ON l.entity_id=e.entity_id AND l.available_at<e.timestamp) SELECT entity_id,timestamp,COUNT(prev_y) AS comparable_label_count,AVG(CASE WHEN prev_y IS NOT NULL THEN CASE WHEN y<>prev_y THEN 1.0 ELSE 0.0 END END) AS label_change_rate,AVG(ABS(y-prev_y)) AS mean_label_step,DATE_DIFF('second',MAX(date) FILTER (WHERE y<>prev_y),timestamp)/86400.0 AS last_change_age_days,AVG(CASE WHEN prev_y IS NOT NULL AND date>=timestamp-INTERVAL '30 days' THEN CASE WHEN y<>prev_y THEN 1.0 ELSE 0.0 END END) AS label_change_rate_30d FROM history GROUP BY entity_id,timestamp",
+   "columns": [
+    "label_change_rate",
+    "mean_label_step",
+    "last_change_age_days",
+    "label_change_rate_30d"
+   ]
+  },
+  {
+   "id": "p20/label_distribution",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(l.date) AS matured_label_count,AVG(l.y) AS historical_y_mean,STDDEV_POP(l.y) AS historical_y_std,AVG(l.y) FILTER (WHERE l.date>=e.timestamp-INTERVAL '30 days') AS y_mean_30d,AVG(l.y) FILTER (WHERE l.date>=e.timestamp-INTERVAL '90 days') AS y_mean_90d FROM eval_table e LEFT JOIN labels l ON l.entity_id=e.entity_id AND l.available_at<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "y_mean_30d"
+   ]
+  },
+  {
+   "id": "p20/event_hub_behavior",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(DISTINCT v.hub) AS visited_hub_count,AVG(CASE WHEN v.id IS NOT NULL THEN CASE WHEN v.hub=n.hub THEN 1.0 ELSE 0.0 END END) AS home_event_fraction,AVG(CASE WHEN v.id IS NOT NULL AND v.date>=e.timestamp-INTERVAL '30 days' THEN CASE WHEN v.hub=n.hub THEN 1.0 ELSE 0.0 END END) AS home_event_fraction_30d,AVG(h.x) AS visited_hub_x_mean,AVG(h.x) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS visited_hub_x_mean_30d FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp LEFT JOIN hub h ON h.id=v.hub GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "visited_hub_x_mean_30d"
+   ]
+  },
+  {
+   "id": "p20/events_since_label",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(v.id) AS events_since_latest_label,AVG(v.x0) AS x0_mean_since_label,STDDEV_POP(v.x0) AS x0_std_since_label,COUNT(DISTINCT v.hub) AS hubs_since_label,AVG(CASE WHEN v.id IS NOT NULL THEN CASE WHEN v.hub=l.hub THEN 1.0 ELSE 0.0 END END) AS latest_label_hub_event_fraction FROM eval_table e LEFT JOIN LATERAL (SELECT date,hub FROM labels WHERE entity_id=e.entity_id AND available_at<e.timestamp ORDER BY date DESC,available_at DESC LIMIT 1) l ON TRUE LEFT JOIN event v ON v.entity=e.entity_id AND v.date>l.date AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "events_since_latest_label",
+    "x0_mean_since_label",
+    "x0_std_since_label",
+    "hubs_since_label",
+    "latest_label_hub_event_fraction"
+   ]
+  },
+  {
+   "id": "p20/event_x1",
+   "sql": "SELECT e.entity_id,e.timestamp,FIRST(v.x1 ORDER BY v.date DESC,v.id DESC) AS x1_latest,AVG(v.x1) AS x1_mean_all,AVG(v.x1) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS x1_mean_7d,STDDEV_POP(v.x1) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS x1_std_30d,CORR(v.x1,v.x0) AS x1_x0_correlation FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "x1_std_30d"
+   ]
+  },
+  {
+   "id": "p20/event_x2",
+   "sql": "SELECT e.entity_id,e.timestamp,FIRST(v.x2 ORDER BY v.date DESC,v.id DESC) AS x2_latest,AVG(v.x2) AS x2_mean_all,AVG(v.x2) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS x2_mean_7d,STDDEV_POP(v.x2) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS x2_std_30d,CORR(v.x2,v.x0) AS x2_x0_correlation FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "x2_mean_7d",
+    "x2_std_30d"
+   ]
+  },
+  {
+   "id": "p21/lifetime_x0",
+   "sql": "SELECT e.entity_id, e.timestamp, COUNT(v.id) AS event_count_all, COALESCE(SUM(v.x0),0) AS x0_sum_all, DATE_DIFF('second',MIN(v.date),e.timestamp)/86400.0 AS history_age_days, AVG(v.x0) AS x0_mean_all, 365.0*SUM(v.x0)/GREATEST(DATE_DIFF('second',MIN(v.date),e.timestamp)/86400.0,30.0) AS x0_annualized_observed, SIGN(SUM(v.x0))*LN(1+ABS(SUM(v.x0))) AS signed_log_x0_total FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "x0_annualized_observed",
+    "signed_log_x0_total"
+   ]
+  },
+  {
+   "id": "p21/volume_windows",
+   "sql": "SELECT e.entity_id,e.timestamp,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '7 days'),0) AS sum_7d,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '30 days'),0) AS sum_30d,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '90 days'),0) AS sum_90d,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '180 days'),0) AS sum_180d,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '365 days'),0) AS sum_365d,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '730 days'),0) AS sum_730d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "sum_180d"
+   ]
+  },
+  {
+   "id": "p21/recency_coverage",
+   "sql": "SELECT e.entity_id,e.timestamp,DATE_DIFF('second',MAX(v.date),e.timestamp)/86400.0 AS last_event_age_days,ARG_MAX(v.x0,STRUCT_PACK(dt:=v.date,event_id:=v.id)) AS last_x0,COUNT(DISTINCT CAST(v.date AS DATE)) FILTER(WHERE v.date>=e.timestamp-INTERVAL '365 days') AS active_days_365d,COUNT(DISTINCT DATE_TRUNC('month',v.date)) FILTER(WHERE v.date>=e.timestamp-INTERVAL '365 days') AS active_months_365d,DATE_DIFF('second',MIN(v.date),MAX(v.date))/86400.0 AS observed_span_days FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "active_days_365d",
+    "active_months_365d"
+   ]
+  },
+  {
+   "id": "p21/size_tail",
+   "sql": "SELECT e.entity_id,e.timestamp,STDDEV_SAMP(v.x0) AS x0_sd_365d,MAX(ABS(v.x0)) AS max_abs_x0_365d,QUANTILE_CONT(v.x0,0.5) AS median_x0_365d,QUANTILE_CONT(v.x0,0.9) AS p90_x0_365d,MAX(ABS(v.x0))/NULLIF(SUM(ABS(v.x0)),0) AS largest_abs_share_365d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '365 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "x0_sd_365d",
+    "max_abs_x0_365d",
+    "median_x0_365d",
+    "p90_x0_365d",
+    "largest_abs_share_365d"
+   ]
+  },
+  {
+   "id": "p21/rate_changes",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(v.id) FILTER(WHERE v.date>=e.timestamp-INTERVAL '30 days')/30.0-COUNT(v.id) FILTER(WHERE v.date<e.timestamp-INTERVAL '30 days' AND v.date>=e.timestamp-INTERVAL '120 days')/90.0 AS count_rate_change_30d,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '30 days'),0)/30.0-COALESCE(SUM(v.x0) FILTER(WHERE v.date<e.timestamp-INTERVAL '30 days' AND v.date>=e.timestamp-INTERVAL '120 days'),0)/90.0 AS volume_rate_change_30d,COUNT(v.id) FILTER(WHERE v.date>=e.timestamp-INTERVAL '90 days')/90.0-COUNT(v.id) FILTER(WHERE v.date<e.timestamp-INTERVAL '90 days')/275.0 AS count_rate_change_90d,COALESCE(SUM(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '90 days'),0)/90.0-COALESCE(SUM(v.x0) FILTER(WHERE v.date<e.timestamp-INTERVAL '90 days'),0)/275.0 AS volume_rate_change_90d,AVG(v.x0) FILTER(WHERE v.date>=e.timestamp-INTERVAL '90 days')-AVG(v.x0) FILTER(WHERE v.date<e.timestamp-INTERVAL '90 days') AS event_size_change_90d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '365 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "count_rate_change_30d",
+    "volume_rate_change_30d",
+    "count_rate_change_90d",
+    "volume_rate_change_90d",
+    "event_size_change_90d"
+   ]
+  },
+  {
+   "id": "p21/timing_decay",
+   "sql": "WITH ordered AS (SELECT e.entity_id,e.timestamp,v.id,v.date,v.x0,LAG(v.date) OVER(PARTITION BY e.entity_id,e.timestamp ORDER BY v.date,v.id) AS previous_date FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp), aged AS (SELECT *,DATE_DIFF('second',previous_date,date)/86400.0 AS gap_days,DATE_DIFF('second',date,timestamp)/86400.0 AS age_days FROM ordered) SELECT entity_id,timestamp,AVG(gap_days) AS mean_gap_days,STDDEV_SAMP(gap_days) AS sd_gap_days,MAX(gap_days) AS max_gap_days,COALESCE(SUM(EXP(-age_days/90.0)),0) AS decayed_count_90d,COALESCE(SUM(x0*EXP(-age_days/90.0)),0) AS decayed_x0_90d FROM aged GROUP BY entity_id,timestamp",
+   "columns": [
+    "decayed_x0_90d"
+   ]
+  },
+  {
+   "id": "p21/hub_mobility",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(DISTINCT v.hub) AS distinct_event_hubs_365d,COUNT(v.id) FILTER(WHERE v.hub=en.hub)*1.0/NULLIF(COUNT(v.id),0) AS home_event_fraction_365d,SUM(ABS(v.x0)) FILTER(WHERE v.hub=en.hub)/NULLIF(SUM(ABS(v.x0)),0) AS home_abs_volume_fraction_365d,COALESCE(SUM(v.x0) FILTER(WHERE v.hub<>en.hub),0) AS away_x0_365d FROM eval_table e LEFT JOIN entity en ON en.id=e.entity_id LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '365 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "home_abs_volume_fraction_365d",
+    "away_x0_365d"
+   ]
+  },
+  {
+   "id": "p21/x1_signal",
+   "sql": "SELECT e.entity_id,e.timestamp,AVG(v.x1) AS mean_x1_365d,STDDEV_SAMP(v.x1) AS sd_x1_365d,AVG(v.x1) FILTER(WHERE v.date>=e.timestamp-INTERVAL '90 days') AS mean_x1_90d,CORR(v.x0,v.x1) AS corr_x0_x1_365d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '365 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "sd_x1_365d",
+    "corr_x0_x1_365d"
+   ]
+  },
+  {
+   "id": "p22/entity_lower_tail",
+   "sql": "SELECT e.entity_id,e.timestamp,s.q10 AS x0_q10,s.q25 AS x0_q25,s.mn AS x0_min,p.latest_percentile,(l.x0-s.q10)/NULLIF(s.sd,0) AS latest_distance_from_q10 FROM eval_table e LEFT JOIN LATERAL (SELECT QUANTILE_CONT(v.x0,0.1) AS q10,QUANTILE_CONT(v.x0,0.25) AS q25,MIN(v.x0) AS mn,STDDEV_SAMP(v.x0) AS sd FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) s ON TRUE LEFT JOIN LATERAL (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1) l ON TRUE LEFT JOIN LATERAL (SELECT AVG(CASE WHEN v.x0<l.x0 THEN 1.0 WHEN v.x0=l.x0 THEN 0.5 ELSE 0.0 END) AS latest_percentile FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) p ON TRUE",
+   "columns": [
+    "x0_q25",
+    "latest_percentile",
+    "latest_distance_from_q10"
+   ]
+  },
+  {
+   "id": "p22/recent_activity",
+   "sql": "SELECT e.entity_id,e.timestamp,COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days')::DOUBLE AS count_7d,COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days')::DOUBLE AS count_30d,AVG(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS mean_30d,MIN(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS min_30d,AVG(v.x0) AS mean_90d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '90 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "min_30d"
+   ]
+  },
+  {
+   "id": "p22/value_trends",
+   "sql": "SELECT e.entity_id,e.timestamp,s.slope_all,s.slope_90d,s.trend_r2,r.recent5_mean-o.older_mean AS recent5_minus_older,r.recent5_std FROM eval_table e LEFT JOIN LATERAL (SELECT REGR_SLOPE(v.x0,-DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS slope_all,REGR_SLOPE(v.x0,-DATE_DIFF('second',v.date,e.timestamp)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS slope_90d,REGR_R2(v.x0,-DATE_DIFF('second',v.date,e.timestamp)/86400.0) AS trend_r2 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) s ON TRUE LEFT JOIN LATERAL (SELECT AVG(z.x0) AS recent5_mean,STDDEV_SAMP(z.x0) AS recent5_std FROM (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 5) z) r ON TRUE LEFT JOIN LATERAL (SELECT AVG(z.x0) AS older_mean FROM (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC OFFSET 5) z) o ON TRUE",
+   "columns": [
+    "trend_r2",
+    "recent5_minus_older",
+    "recent5_std"
+   ]
+  },
+  {
+   "id": "p22/population_tail",
+   "sql": "SELECT e.entity_id,e.timestamp,g.q10 AS population_q10,g.mu AS population_mean,g.sd AS population_std,(l.x0-g.mu)/NULLIF(g.sd,0) AS latest_population_z,p.low_fraction AS entity_population_low_fraction FROM eval_table e LEFT JOIN LATERAL (SELECT QUANTILE_CONT(v.x0,0.1) AS q10,AVG(v.x0) AS mu,STDDEV_SAMP(v.x0) AS sd FROM event v WHERE v.date<e.timestamp) g ON TRUE LEFT JOIN LATERAL (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1) l ON TRUE LEFT JOIN LATERAL (SELECT AVG(CASE WHEN v.x0<g.q10 THEN 1.0 ELSE 0.0 END) AS low_fraction FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) p ON TRUE",
+   "columns": [
+    "population_q10",
+    "latest_population_z",
+    "entity_population_low_fraction"
+   ]
+  },
+  {
+   "id": "p22/home_hub_tail",
+   "sql": "SELECT e.entity_id,e.timestamp,g.q10 AS home_hub_q10,g.mu AS home_hub_mean,g.n AS home_hub_event_count,p.low_fraction AS entity_home_threshold_low_fraction,(l.x0-g.q10)/NULLIF(g.sd,0) AS latest_home_tail_distance FROM eval_table e LEFT JOIN entity en ON en.id=e.entity_id LEFT JOIN LATERAL (SELECT QUANTILE_CONT(v.x0,0.1) AS q10,AVG(v.x0) AS mu,STDDEV_SAMP(v.x0) AS sd,COUNT(*)::DOUBLE AS n FROM event v WHERE v.hub=en.hub AND v.date<e.timestamp) g ON TRUE LEFT JOIN LATERAL (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1) l ON TRUE LEFT JOIN LATERAL (SELECT AVG(CASE WHEN v.x0<g.q10 THEN 1.0 ELSE 0.0 END) AS low_fraction FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND g.q10 IS NOT NULL) p ON TRUE",
+   "columns": [
+    "home_hub_q10",
+    "entity_home_threshold_low_fraction",
+    "latest_home_tail_distance"
+   ]
+  },
+  {
+   "id": "p22/last_acting_hub",
+   "sql": "SELECT e.entity_id,e.timestamp,g.q10 AS last_hub_q10,g.n AS last_hub_event_count,g.mu AS last_hub_mean,p.away_fraction,(l.x0-g.q10)/NULLIF(g.sd,0) AS latest_acting_hub_tail_distance FROM eval_table e LEFT JOIN entity en ON en.id=e.entity_id LEFT JOIN LATERAL (SELECT v.hub,v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1) l ON TRUE LEFT JOIN LATERAL (SELECT QUANTILE_CONT(v.x0,0.1) AS q10,COUNT(*)::DOUBLE AS n,AVG(v.x0) AS mu,STDDEV_SAMP(v.x0) AS sd FROM event v WHERE v.hub=l.hub AND v.date<e.timestamp) g ON TRUE LEFT JOIN LATERAL (SELECT AVG(CASE WHEN v.hub<>en.hub THEN 1.0 ELSE 0.0 END) AS away_fraction FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND en.hub IS NOT NULL) p ON TRUE",
+   "columns": [
+    "last_hub_q10",
+    "last_hub_event_count",
+    "last_hub_mean",
+    "latest_acting_hub_tail_distance"
+   ]
+  },
+  {
+   "id": "p22/pooled_label_risk",
+   "sql": "SELECT e.entity_id,e.timestamp,h.n AS home_label_count,(COALESCE(h.sy,0)+10.0*g.mu)/(h.n+10.0) AS home_label_smoothed_mean,h.recent_mu AS home_label_mean_90d,g.mu AS population_label_mean,(COALESCE(s.sy,0)+5.0*g.mu)/(s.n+5.0)-g.mu AS entity_label_shrunken_excess FROM eval_table e LEFT JOIN entity en ON en.id=e.entity_id LEFT JOIN LATERAL (SELECT AVG(v.y) AS mu FROM labels v WHERE v.available_at<e.timestamp) g ON TRUE LEFT JOIN LATERAL (SELECT COUNT(v.y)::DOUBLE AS n,SUM(v.y) AS sy,AVG(v.y) FILTER (WHERE v.available_at>=e.timestamp-INTERVAL '90 days') AS recent_mu FROM labels v WHERE v.hub=en.hub AND v.available_at<e.timestamp) h ON TRUE LEFT JOIN LATERAL (SELECT COUNT(v.y)::DOUBLE AS n,SUM(v.y) AS sy FROM labels v WHERE v.entity_id=e.entity_id AND v.available_at<e.timestamp) s ON TRUE",
+   "columns": [
+    "entity_label_shrunken_excess"
+   ]
+  },
+  {
+   "id": "p22/last_event_sequence",
+   "sql": "SELECT e.entity_id,e.timestamp,l.x0 AS latest_x0,p.x0 AS previous_x0,t.x0 AS third_latest_x0,r.min3 AS last3_min,r.mean3 AS last3_mean FROM eval_table e LEFT JOIN LATERAL (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1) l ON TRUE LEFT JOIN LATERAL (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1 OFFSET 1) p ON TRUE LEFT JOIN LATERAL (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 1 OFFSET 2) t ON TRUE LEFT JOIN LATERAL (SELECT MIN(z.x0) AS min3,AVG(z.x0) AS mean3 FROM (SELECT v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 3) z) r ON TRUE",
+   "columns": [
+    "third_latest_x0"
+   ]
+  },
+  {
+   "id": "p23/home_hub_values",
+   "sql": "SELECT e.entity_id, e.timestamp, a.mean_30d AS hub_x0_mean_30d, a.std_30d AS hub_x0_std_30d, a.mean_7d AS hub_x0_mean_7d, a.mean_7d-a.mean_prev_23d AS hub_x0_recent_change, a.peer_mean_30d AS hub_other_actor_x0_30d FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN LATERAL (SELECT AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS mean_30d, STDDEV_SAMP(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days') AS std_30d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '7 days') AS mean_7d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days' AND v.date < e.timestamp - INTERVAL '7 days') AS mean_prev_23d, AVG(v.x0) FILTER (WHERE v.date >= e.timestamp - INTERVAL '30 days' AND v.entity <> e.entity_id) AS peer_mean_30d FROM event v WHERE v.hub = n.hub AND v.date < e.timestamp) a ON TRUE",
+   "columns": [
+    "hub_x0_recent_change"
+   ]
+  },
+  {
+   "id": "p23/resident_label_priors",
+   "sql": "SELECT e.entity_id, e.timestamp, p.peer_count AS resident_peer_label_count, p.peer_mean AS resident_peer_label_mean, g.mean_y AS global_label_mean, (COALESCE(p.peer_sum, 0) + 20.0*g.mean_y)/(p.peer_count+20.0) AS resident_smoothed_rate, (COALESCE(s.sum_y, 0) + 5.0*COALESCE(p.peer_mean, g.mean_y))/(s.n+5.0) AS entity_smoothed_rate FROM eval_table e LEFT JOIN entity n ON n.id = e.entity_id LEFT JOIN LATERAL (SELECT COUNT(l.y) AS peer_count, SUM(l.y) AS peer_sum, AVG(l.y) AS peer_mean FROM labels l JOIN entity r ON r.id = l.entity_id WHERE r.hub = n.hub AND l.entity_id <> e.entity_id AND l.available_at < e.timestamp) p ON TRUE LEFT JOIN LATERAL (SELECT AVG(l.y) AS mean_y FROM labels l WHERE l.available_at < e.timestamp) g ON TRUE LEFT JOIN LATERAL (SELECT COUNT(l.y) AS n, SUM(l.y) AS sum_y FROM labels l WHERE l.entity_id = e.entity_id AND l.available_at < e.timestamp) s ON TRUE",
+   "columns": [
+    "entity_smoothed_rate"
+   ]
+  },
+  {
+   "id": "p24/time_trends",
+   "sql": "SELECT e.entity_id,e.timestamp, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) AS slope_all, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS slope_7d, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS slope_30d, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '90 days') AS slope_90d, REGR_R2(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS trend_r2_30d, COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS trend_count_30d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "slope_7d",
+    "trend_r2_30d"
+   ]
+  },
+  {
+   "id": "p24/trend_acceleration",
+   "sql": "SELECT e.entity_id,e.timestamp, s.s7-s.sprev AS slope_change_7d, s.s30-s.solder AS slope_change_30d, s.s7*s.sprev AS slope_agreement_7d, s.s30*s.solder AS slope_agreement_30d, s.s7-s.s30 AS short_long_slope_gap FROM eval_table e LEFT JOIN LATERAL (SELECT REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS s7, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days' AND v.date<e.timestamp-INTERVAL '7 days') AS sprev, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS s30, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date<e.timestamp-INTERVAL '30 days') AS solder FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp) s ON TRUE",
+   "columns": [
+    "slope_change_7d",
+    "slope_change_30d",
+    "slope_agreement_7d",
+    "slope_agreement_30d",
+    "short_long_slope_gap"
+   ]
+  },
+  {
+   "id": "p24/last_five_shape",
+   "sql": "SELECT e.entity_id,e.timestamp, s.vals[1] AS last_x0, s.vals[1]-s.vals[2] AS last_step, s.vals[1]-2*s.vals[2]+s.vals[3] AS last_step_change, s.vals[1]-s.avg5 AS last_minus_mean5, s.slope5 AS slope_last5, s.std5 AS std_last5 FROM eval_table e LEFT JOIN LATERAL (SELECT LIST(q.x0 ORDER BY q.date DESC,q.id DESC) AS vals, AVG(q.x0) AS avg5, STDDEV_SAMP(q.x0) AS std5, REGR_SLOPE(q.x0,DATE_DIFF('second',e.timestamp,q.date)/86400.0) AS slope5 FROM (SELECT v.id,v.date,v.x0 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp ORDER BY v.date DESC,v.id DESC LIMIT 5) q) s ON TRUE",
+   "columns": [
+    "last_step_change",
+    "last_minus_mean5",
+    "slope_last5"
+   ]
+  },
+  {
+   "id": "p24/extremes_reversion",
+   "sql": "SELECT e.entity_id,e.timestamp, (s.last_x-s.avg30)/NULLIF(s.std30,0) AS last_z_30d, (s.last_x-s.lo30)/NULLIF(s.hi30-s.lo30,0) AS range_position_30d, s.hi30-s.lo30 AS range_30d, DATE_DIFF('second',s.peak_date,e.timestamp)/86400.0 AS peak_age_30d, DATE_DIFF('second',s.trough_date,e.timestamp)/86400.0 AS trough_age_30d FROM eval_table e LEFT JOIN LATERAL (SELECT FIRST(v.x0 ORDER BY v.date DESC,v.id DESC) AS last_x, AVG(v.x0) AS avg30, STDDEV_SAMP(v.x0) AS std30, MIN(v.x0) AS lo30, MAX(v.x0) AS hi30, FIRST(v.date ORDER BY v.x0 DESC,v.date DESC,v.id DESC) AS peak_date, FIRST(v.date ORDER BY v.x0 ASC,v.date DESC,v.id DESC) AS trough_date FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days') s ON TRUE",
+   "columns": [
+    "last_z_30d",
+    "range_position_30d",
+    "range_30d",
+    "peak_age_30d",
+    "trough_age_30d"
+   ]
+  },
+  {
+   "id": "p24/trend_noise",
+   "sql": "SELECT e.entity_id,e.timestamp, s.std7/NULLIF(s.std30,0) AS volatility_ratio_7_30, s.std30 AS volatility_30d, s.std90 AS volatility_90d, s.var30*(1-s.r230) AS residual_variance_30d, s.slope30*7/NULLIF(s.std30,0) AS standardized_weekly_trend FROM eval_table e LEFT JOIN LATERAL (SELECT STDDEV_SAMP(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days') AS std7, STDDEV_SAMP(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS std30, STDDEV_SAMP(v.x0) AS std90, VAR_POP(v.x0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS var30, REGR_R2(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS r230, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days') AS slope30 FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '90 days') s ON TRUE",
+   "columns": [
+    "volatility_ratio_7_30",
+    "volatility_90d",
+    "residual_variance_30d",
+    "standardized_weekly_trend"
+   ]
+  },
+  {
+   "id": "p24/activity_context",
+   "sql": "SELECT e.entity_id,e.timestamp, COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '1 day') AS count_1d, COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days')/30.0 AS daily_rate_30d, COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '7 days')/7.0-COUNT(v.id) FILTER (WHERE v.date>=e.timestamp-INTERVAL '30 days' AND v.date<e.timestamp-INTERVAL '7 days')/23.0 AS activity_change, COUNT(DISTINCT v.hub) AS visited_hubs_30d, AVG(CASE WHEN v.id IS NULL THEN NULL WHEN v.hub=n.hub THEN 0.0 ELSE 1.0 END) AS away_fraction_30d FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "daily_rate_30d"
+   ]
+  },
+  {
+   "id": "p24/home_hub_context",
+   "sql": "SELECT e.entity_id,e.timestamp, s.peer_mean AS home_peer_mean_30d, s.peer_slope AS home_peer_slope_30d, s.peer_count AS home_peer_count_30d, t.own_mean-s.peer_mean AS own_peer_level_gap, t.own_slope-s.peer_slope AS own_peer_slope_gap FROM eval_table e LEFT JOIN entity n ON n.id=e.entity_id LEFT JOIN LATERAL (SELECT AVG(v.x0) AS peer_mean, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) AS peer_slope, COUNT(v.id) AS peer_count FROM event v WHERE v.hub=n.hub AND v.entity<>e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days') s ON TRUE LEFT JOIN LATERAL (SELECT AVG(v.x0) AS own_mean, REGR_SLOPE(v.x0,DATE_DIFF('second',e.timestamp,v.date)/86400.0) AS own_slope FROM event v WHERE v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days') t ON TRUE",
+   "columns": [
+    "own_peer_level_gap",
+    "own_peer_slope_gap"
+   ]
+  },
+  {
+   "id": "p24/x1_relationship",
+   "sql": "SELECT e.entity_id,e.timestamp, AVG(v.x1) AS x1_mean_30d, REGR_SLOPE(v.x1,DATE_DIFF('second',e.timestamp,v.date)/86400.0) AS x1_slope_30d, CORR(v.x0,v.x1) AS x0_x1_corr_30d, FIRST(v.x1 ORDER BY v.date DESC,v.id DESC)-AVG(v.x1) AS x1_latest_deviation, COUNT(v.x1) AS x1_count_30d FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "x0_x1_corr_30d",
+    "x1_latest_deviation",
+    "x1_count_30d"
+   ]
+  },
+  {
+   "id": "p24/x2_relationship",
+   "sql": "SELECT e.entity_id,e.timestamp, AVG(v.x2) AS x2_mean_30d, REGR_SLOPE(v.x2,DATE_DIFF('second',e.timestamp,v.date)/86400.0) AS x2_slope_30d, CORR(v.x0,v.x2) AS x0_x2_corr_30d, FIRST(v.x2 ORDER BY v.date DESC,v.id DESC)-AVG(v.x2) AS x2_latest_deviation FROM eval_table e LEFT JOIN event v ON v.entity=e.entity_id AND v.date<e.timestamp AND v.date>=e.timestamp-INTERVAL '30 days' GROUP BY e.entity_id,e.timestamp",
+   "columns": [
+    "x2_slope_30d",
+    "x0_x2_corr_30d",
+    "x2_latest_deviation"
+   ]
+  }
+ ]
+}

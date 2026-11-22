@@ -1,0 +1,62 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-event",
+ "task": "user-repeat",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "users",
+   "columns": [
+    "locale",
+    "gender",
+    "location",
+    "birthyear",
+    "timezone"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "users__snapshot",
+   "entity": "user",
+   "blocks": [
+    {
+     "name": "positive_attendance_state",
+     "sql": "SELECT e.user, e.timestamp, COUNT(a.event) FILTER (WHERE a.start_time >= e.timestamp - INTERVAL '28 days') AS response_rows_28d, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe')) AS positive_events_lifetime, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '7 days') AS positive_events_7d, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '14 days') AS positive_events_14d, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '28 days') AS positive_events_28d, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '56 days') AS positive_events_56d, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '14 days' AND a.start_time < e.timestamp - INTERVAL '7 days') AS positive_events_previous_7d, COUNT(DISTINCT a.event) FILTER (WHERE a.status = 'yes' AND a.start_time >= e.timestamp - INTERVAL '28 days') AS yes_events_28d, COUNT(DISTINCT a.event) FILTER (WHERE a.status = 'maybe' AND a.start_time >= e.timestamp - INTERVAL '28 days') AS maybe_events_28d, COUNT(DISTINCT CAST(a.start_time AS DATE)) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '28 days') AS positive_days_28d, COUNT(DISTINCT CAST(FLOOR(epoch(e.timestamp - a.start_time) / 604800.0) AS BIGINT)) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time > e.timestamp - INTERVAL '56 days') AS positive_weeks_8w, epoch(e.timestamp - MAX(a.start_time)) / 86400.0 AS days_since_last_response, epoch(e.timestamp - MAX(a.start_time) FILTER (WHERE a.status IN ('yes','maybe'))) / 86400.0 AS days_since_last_positive, COUNT(a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '28 days') * 1.0 / NULLIF(COUNT(a.event) FILTER (WHERE a.start_time >= e.timestamp - INTERVAL '28 days'), 0) AS positive_response_rate_28d FROM eval_table e LEFT JOIN event_attendees a ON a.user_id = e.user AND a.start_time < e.timestamp GROUP BY e.user, e.timestamp"
+    },
+    {
+     "name": "positive_cadence",
+     "sql": "WITH positive_days AS (SELECT DISTINCT e.user, e.timestamp, CAST(a.start_time AS DATE) AS activity_day FROM eval_table e JOIN event_attendees a ON a.user_id = e.user AND a.start_time < e.timestamp AND a.start_time >= e.timestamp - INTERVAL '180 days' AND a.status IN ('yes','maybe')), gaps AS (SELECT user, timestamp, activity_day, date_diff('day', LAG(activity_day) OVER (PARTITION BY user, timestamp ORDER BY activity_day), activity_day) AS gap_days FROM positive_days) SELECT e.user, e.timestamp, MEDIAN(g.gap_days) AS median_positive_day_gap, STDDEV_POP(g.gap_days) AS positive_day_gap_std, ARG_MAX(g.gap_days, g.activity_day) AS latest_positive_day_gap FROM eval_table e LEFT JOIN gaps g ON g.user = e.user AND g.timestamp = e.timestamp GROUP BY e.user, e.timestamp"
+    },
+    {
+     "name": "interest_state",
+     "sql": "SELECT e.user, e.timestamp, COUNT(i.event) FILTER (WHERE i.timestamp >= e.timestamp - INTERVAL '7 days') AS interest_rows_7d, COUNT(DISTINCT i.event) FILTER (WHERE i.interested > 0 AND i.timestamp >= e.timestamp - INTERVAL '28 days') AS interested_events_28d, COUNT(DISTINCT i.event) FILTER (WHERE i.invited > 0 AND i.timestamp >= e.timestamp - INTERVAL '28 days') AS invited_events_28d, epoch(e.timestamp - MAX(i.timestamp)) / 86400.0 AS days_since_last_interest FROM eval_table e LEFT JOIN event_interest i ON i.user = e.user AND i.timestamp < e.timestamp GROUP BY e.user, e.timestamp"
+    },
+    {
+     "name": "matured_personal_history",
+     "sql": "SELECT e.user, e.timestamp, COUNT(m.target) AS matured_windows, AVG(CAST(m.target AS DOUBLE)) AS historical_repeat_rate, ARG_MAX(m.target, m.timestamp) AS latest_matured_repeat, epoch(e.timestamp - MAX(m.label_window_end)) / 86400.0 AS days_since_latest_matured_window FROM eval_table e LEFT JOIN matured_labels m ON m.user = e.user AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp GROUP BY e.user, e.timestamp"
+    },
+    {
+     "name": "tenure",
+     "sql": "SELECT e.user, e.timestamp, epoch(e.timestamp - u.joinedAt) / 86400.0 AS days_since_joined FROM eval_table e LEFT JOIN users u ON u.user_id = e.user AND u.joinedAt <= e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "personal_repeat_examples",
+   "entity": "user",
+   "sql": "WITH history AS (SELECT e.user, e.timestamp, m.timestamp AS historical_cutoff, m.label_window_end, m.target AS matured_repeat, ROW_NUMBER() OVER (PARTITION BY e.user, e.timestamp ORDER BY m.timestamp DESC, m.label_window_end DESC) AS history_rank FROM eval_table e JOIN matured_labels m ON m.user = e.user AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp QUALIFY history_rank <= 8) SELECT h.user, h.timestamp, h.history_rank, h.historical_cutoff, h.label_window_end AS outcome_known_since, h.matured_repeat, epoch(h.timestamp - h.historical_cutoff) / 86400.0 AS example_age_days, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= h.historical_cutoff - INTERVAL '7 days') AS preceding_positive_events_7d, COUNT(DISTINCT a.event) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= h.historical_cutoff - INTERVAL '28 days') AS preceding_positive_events_28d, COUNT(DISTINCT CAST(a.start_time AS DATE)) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= h.historical_cutoff - INTERVAL '28 days') AS preceding_positive_days_28d, epoch(h.historical_cutoff - MAX(a.start_time) FILTER (WHERE a.status IN ('yes','maybe'))) / 86400.0 AS preceding_days_since_positive FROM history h LEFT JOIN event_attendees a ON a.user_id = h.user AND a.start_time < h.timestamp AND a.start_time < h.historical_cutoff GROUP BY h.user, h.timestamp, h.history_rank, h.historical_cutoff, h.label_window_end, h.matured_repeat",
+   "max_rows_per_case": 8,
+   "fkeys": {}
+  },
+  {
+   "type": "derived_table",
+   "name": "recent_response_sessions",
+   "entity": "user",
+   "sql": "WITH sessions AS (SELECT e.user, e.timestamp, CAST(a.start_time AS DATE) AS activity_day, MAX(a.start_time) AS last_response_time, COUNT(DISTINCT a.event) AS response_events, COUNT(DISTINCT a.event) FILTER (WHERE a.status = 'yes') AS yes_events, COUNT(DISTINCT a.event) FILTER (WHERE a.status = 'maybe') AS maybe_events, COUNT(DISTINCT a.event) FILTER (WHERE a.status = 'no') AS declined_events FROM eval_table e JOIN event_attendees a ON a.user_id = e.user AND a.start_time < e.timestamp GROUP BY e.user, e.timestamp, activity_day), ordered AS (SELECT *, date_diff('day', LAG(activity_day) OVER (PARTITION BY user, timestamp ORDER BY activity_day), activity_day) AS gap_from_previous_session_days, ROW_NUMBER() OVER (PARTITION BY user, timestamp ORDER BY activity_day DESC) AS session_rank FROM sessions) SELECT user, timestamp, session_rank, last_response_time, epoch(timestamp - last_response_time) / 86400.0 AS age_days, response_events, yes_events, maybe_events, declined_events, gap_from_previous_session_days FROM ordered WHERE session_rank <= 8",
+   "max_rows_per_case": 8,
+   "fkeys": {}
+  }
+ ]
+}

@@ -1,0 +1,69 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-f1",
+ "task": "driver-top3",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "drivers",
+   "columns": [
+    "nationality",
+    "dob"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "constructors",
+   "columns": [
+    "name",
+    "nationality"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "drivers__snapshot",
+   "entity": "driverId",
+   "blocks": [
+    {
+     "name": "qualifying_form",
+     "sql": "WITH ranked AS (SELECT e.driverId,e.date,q.date AS event_date,q.position,row_number() OVER (PARTITION BY e.driverId,e.date ORDER BY q.date DESC,q.raceId DESC,q.qualifyId DESC) AS rn FROM eval_table e JOIN qualifying q ON q.driverId=e.driverId AND q.date<e.date), summary AS (SELECT driverId,date,count(*) AS qualifying_starts, count(*) FILTER (WHERE event_date>=date-INTERVAL '365 days') AS qualifying_starts_365d,count(*) FILTER (WHERE event_date>=date-INTERVAL '90 days') AS qualifying_starts_90d,date_diff('day',max(event_date),date) AS days_since_qualifying,max(position) FILTER (WHERE rn=1) AS last_qualifying_position,avg(position) FILTER (WHERE rn<=3) AS mean_qualifying_position_3,avg(position) FILTER (WHERE rn<=10) AS mean_qualifying_position_10,min(position) FILTER (WHERE rn<=10) AS best_qualifying_position_10,avg(CAST(position<=3 AS DOUBLE)) FILTER (WHERE rn<=3) AS qualifying_top3_rate_3,avg(CAST(position<=3 AS DOUBLE)) FILTER (WHERE rn<=10) AS qualifying_top3_rate_10,avg(CAST(position<=3 AS DOUBLE)) FILTER (WHERE rn<=20) AS qualifying_top3_rate_20,avg(position) FILTER (WHERE rn<=3)-avg(position) FILTER (WHERE rn BETWEEN 4 AND 10) AS qualifying_position_change,date_diff('day',max(event_date) FILTER (WHERE position<=3),date) AS days_since_top3_qualifying FROM ranked GROUP BY driverId,date) SELECT e.driverId,e.date,coalesce(s.qualifying_starts,0) AS qualifying_starts,coalesce(s.qualifying_starts_365d,0) AS qualifying_starts_365d,coalesce(s.qualifying_starts_90d,0) AS qualifying_starts_90d,s.days_since_qualifying,s.last_qualifying_position,s.mean_qualifying_position_3,s.mean_qualifying_position_10,s.best_qualifying_position_10,s.qualifying_top3_rate_3,s.qualifying_top3_rate_10,s.qualifying_top3_rate_20,s.qualifying_position_change,s.days_since_top3_qualifying FROM eval_table e LEFT JOIN summary s ON s.driverId=e.driverId AND s.date=e.date"
+    },
+    {
+     "name": "grid_form_and_activity",
+     "sql": "WITH ranked AS (SELECT e.driverId,e.date,r.date AS event_date,r.grid,r.positionOrder,r.points,row_number() OVER (PARTITION BY e.driverId,e.date ORDER BY r.date DESC,r.raceId DESC,r.resultId DESC) AS rn FROM eval_table e JOIN results r ON r.driverId=e.driverId AND r.date<e.date), summary AS (SELECT driverId,date,count(*) FILTER (WHERE event_date>=date-INTERVAL '365 days') AS race_starts_365d,count(*) FILTER (WHERE event_date>=date-INTERVAL '30 days') AS race_starts_30d,date_diff('day',max(event_date),date) AS days_since_race,avg(CASE WHEN grid>0 THEN grid END) FILTER (WHERE rn<=3) AS mean_grid_3,avg(CASE WHEN grid>0 THEN grid END) FILTER (WHERE rn<=10) AS mean_grid_10,avg(CASE WHEN grid>0 THEN CAST(grid<=3 AS DOUBLE) END) FILTER (WHERE rn<=10) AS grid_top3_rate_10,avg(positionOrder) FILTER (WHERE rn<=3) AS mean_finish_3,avg(points) FILTER (WHERE rn<=3) AS mean_points_3 FROM ranked GROUP BY driverId,date) SELECT e.driverId,e.date,coalesce(s.race_starts_365d,0) AS race_starts_365d,coalesce(s.race_starts_30d,0) AS race_starts_30d,s.days_since_race,s.mean_grid_3,s.mean_grid_10,s.grid_top3_rate_10,s.mean_finish_3,s.mean_points_3 FROM eval_table e LEFT JOIN summary s ON s.driverId=e.driverId AND s.date=e.date"
+    },
+    {
+     "name": "latest_standings",
+     "sql": "SELECT e.driverId,e.date,s.position AS standing_position,s.points AS standing_points,s.wins AS standing_wins,date_diff('day',s.date,e.date) AS standing_age_days FROM eval_table e LEFT JOIN standings s ON s.driverId=e.driverId AND s.date<e.date QUALIFY row_number() OVER (PARTITION BY e.driverId,e.date ORDER BY s.date DESC,s.raceId DESC,s.driverStandingsId DESC)=1"
+    },
+    {
+     "name": "matured_driver_outcomes",
+     "sql": "SELECT e.driverId,e.date,count(m.qualifying) AS prior_label_count,avg(CAST(m.qualifying AS DOUBLE)) AS prior_positive_rate,avg(CAST(m.qualifying AS DOUBLE)) FILTER (WHERE m.date>=e.date-INTERVAL '365 days') AS prior_positive_rate_365d,arg_max(m.qualifying,m.date) AS last_matured_label,date_diff('day',max(m.date),e.date) AS last_matured_label_age_days FROM eval_table e LEFT JOIN matured_labels m ON m.driverId=e.driverId AND m.date<e.date AND m.label_window_end<e.date AND m.qualifying IS NOT NULL GROUP BY e.driverId,e.date"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "driver_qualifying_comparisons",
+   "entity": "driverId",
+   "sql": "WITH own_recent AS (SELECT e.driverId,e.date,q.qualifyId,q.raceId,q.constructorId,q.date AS qualifying_date,q.position,row_number() OVER (PARTITION BY e.driverId,e.date ORDER BY q.date DESC,q.raceId DESC,q.qualifyId DESC) AS event_rank FROM eval_table e JOIN qualifying q ON q.driverId=e.driverId AND q.date<e.date QUALIFY event_rank<=8) SELECT o.driverId,o.date,o.constructorId,o.qualifying_date,o.event_rank,date_diff('day',o.qualifying_date,o.date) AS age_days,o.position AS qualifying_position,CAST(o.position<=3 AS INTEGER) AS qualified_top3,f.field_size,o.position*1.0/nullif(f.field_size,0) AS qualifying_position_fraction,f.teammate_count,f.teammate_best_position,f.teammate_mean_position,o.position-f.teammate_best_position AS position_gap_to_best_teammate,f.constructor_top3_entries,r.grid AS race_grid FROM own_recent o LEFT JOIN LATERAL (SELECT count(*) AS field_size,count(*) FILTER (WHERE p.constructorId=o.constructorId AND p.driverId<>o.driverId) AS teammate_count,min(p.position) FILTER (WHERE p.constructorId=o.constructorId AND p.driverId<>o.driverId) AS teammate_best_position,avg(p.position) FILTER (WHERE p.constructorId=o.constructorId AND p.driverId<>o.driverId) AS teammate_mean_position,count(*) FILTER (WHERE p.constructorId=o.constructorId AND p.position<=3) AS constructor_top3_entries FROM qualifying p WHERE p.raceId=o.raceId AND p.date<o.date) f ON true LEFT JOIN LATERAL (SELECT r.grid FROM results r WHERE r.driverId=o.driverId AND r.raceId=o.raceId AND r.date<o.date ORDER BY r.date DESC,r.resultId DESC LIMIT 1) r ON true",
+   "max_rows_per_case": 8,
+   "fkeys": {
+    "constructorId": "constructors"
+   }
+  },
+  {
+   "type": "derived_table",
+   "name": "driver_constructor_peers",
+   "entity": "driverId",
+   "sql": "WITH own_entries AS (SELECT e.driverId,e.date,r.constructorId,r.date AS event_date,r.raceId,r.resultId AS source_id,0 AS source_priority FROM eval_table e JOIN results r ON r.driverId=e.driverId AND r.date<e.date UNION ALL SELECT e.driverId,e.date,q.constructorId,q.date AS event_date,q.raceId,q.qualifyId AS source_id,1 AS source_priority FROM eval_table e JOIN qualifying q ON q.driverId=e.driverId AND q.date<e.date), current_constructor AS (SELECT driverId,date,constructorId FROM own_entries QUALIFY row_number() OVER (PARTITION BY driverId,date ORDER BY event_date DESC,raceId DESC,source_priority DESC,source_id DESC)=1), peer_results AS (SELECT c.driverId,c.date,c.constructorId,r.driverId AS peerDriverId,r.raceId,r.date AS event_date,r.grid,r.positionOrder,row_number() OVER (PARTITION BY c.driverId,c.date,r.driverId ORDER BY r.date DESC,r.raceId DESC,r.resultId DESC) AS rn FROM current_constructor c JOIN results r ON r.constructorId=c.constructorId AND r.driverId<>c.driverId AND r.date<c.date AND r.date>=c.date-INTERVAL '365 days'), peer_summary AS (SELECT p.driverId,p.date,p.constructorId,p.peerDriverId,max(p.event_date) AS last_seen,count(*) AS peer_race_count_5,avg(CASE WHEN p.grid>0 THEN p.grid END) AS peer_mean_grid_5,avg(CASE WHEN p.grid>0 THEN CAST(p.grid<=3 AS DOUBLE) END) AS peer_grid_top3_rate_5,avg(p.positionOrder) AS peer_mean_finish_5,count(q.position) AS peer_qualifying_count_5,avg(q.position) AS peer_mean_qualifying_position_5,avg(CAST(q.position<=3 AS DOUBLE)) AS peer_qualifying_top3_rate_5 FROM peer_results p LEFT JOIN qualifying q ON q.driverId=p.peerDriverId AND q.raceId=p.raceId AND q.constructorId=p.constructorId AND q.date<p.date WHERE p.rn<=5 GROUP BY p.driverId,p.date,p.constructorId,p.peerDriverId), selected AS (SELECT * FROM peer_summary QUALIFY row_number() OVER (PARTITION BY driverId,date ORDER BY last_seen DESC,peerDriverId)<=2) SELECT p.driverId,p.date,p.constructorId,p.peerDriverId,date_diff('day',p.last_seen,p.date) AS peer_last_seen_age_days,p.peer_race_count_5,p.peer_mean_grid_5,p.peer_grid_top3_rate_5,p.peer_mean_finish_5,p.peer_qualifying_count_5,p.peer_mean_qualifying_position_5,p.peer_qualifying_top3_rate_5,h.peer_matured_label_count_365d,h.peer_matured_positive_rate_365d,h.peer_last_matured_label,h.peer_last_matured_label_age_days FROM selected p LEFT JOIN LATERAL (SELECT count(m.qualifying) FILTER (WHERE m.date>=p.date-INTERVAL '365 days') AS peer_matured_label_count_365d,avg(CAST(m.qualifying AS DOUBLE)) FILTER (WHERE m.date>=p.date-INTERVAL '365 days') AS peer_matured_positive_rate_365d,arg_max(m.qualifying,m.date) AS peer_last_matured_label,date_diff('day',max(m.date),p.date) AS peer_last_matured_label_age_days FROM matured_labels m WHERE m.driverId=p.peerDriverId AND m.date<p.date AND m.label_window_end<p.date AND m.qualifying IS NOT NULL) h ON true",
+   "max_rows_per_case": 2,
+   "fkeys": {
+    "peerDriverId": "drivers",
+    "constructorId": "constructors"
+   }
+  }
+ ]
+}

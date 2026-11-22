@@ -1,0 +1,71 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "retailrocket-4db",
+ "task": "item-cvr",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "Item",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "Visitor",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "Item__snapshot",
+   "entity": "itemid",
+   "blocks": [
+    {
+     "name": "item_demand",
+     "sql": "SELECT e.itemid, e.timestamp, COUNT(v.timestamp) AS views_all, COUNT(v.timestamp) FILTER (WHERE v.timestamp >= e.timestamp - INTERVAL '1 day') AS views_1d, COUNT(v.timestamp) FILTER (WHERE v.timestamp >= e.timestamp - INTERVAL '1 hour') AS views_1h, DATE_DIFF('second', MAX(v.timestamp), e.timestamp) AS seconds_since_view FROM (SELECT DISTINCT itemid, timestamp FROM eval_table) e LEFT JOIN View v ON v.itemid = e.itemid AND v.timestamp < e.timestamp GROUP BY e.itemid, e.timestamp"
+    },
+    {
+     "name": "item_conversion",
+     "sql": "SELECT e.itemid, e.timestamp, COUNT(m.timestamp) AS matured_count, COALESCE(SUM(m.added_to_cart), 0) AS matured_carts FROM (SELECT DISTINCT itemid, timestamp FROM eval_table) e LEFT JOIN matured_labels m ON m.itemid = e.itemid AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp GROUP BY e.itemid, e.timestamp"
+    },
+    {
+     "name": "item_stock",
+     "sql": "SELECT e.itemid, e.timestamp, FIRST(TRY_CAST(a.available AS DOUBLE) ORDER BY a.timestamp DESC NULLS LAST, a.available DESC NULLS LAST) AS available_numeric FROM (SELECT DISTINCT itemid, timestamp FROM eval_table) e LEFT JOIN ItemAvailability a ON a.itemid = e.itemid AND a.timestamp < e.timestamp GROUP BY e.itemid, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "snapshot_table",
+   "name": "Visitor__snapshot",
+   "entity": "visitorid",
+   "blocks": [
+    {
+     "name": "visitor_history",
+     "sql": "SELECT e.visitorid, e.timestamp, COUNT(v.timestamp) AS views_all, DATE_DIFF('second', MAX(v.timestamp), e.timestamp) AS seconds_since_view FROM (SELECT DISTINCT visitorid, timestamp FROM eval_table) e LEFT JOIN View v ON v.visitorid = e.visitorid AND v.timestamp < e.timestamp GROUP BY e.visitorid, e.timestamp"
+    },
+    {
+     "name": "visitor_conversion",
+     "sql": "SELECT e.visitorid, e.timestamp, COUNT(m.timestamp) AS matured_count, COALESCE(SUM(m.added_to_cart), 0) AS matured_carts, DATE_DIFF('second', MAX(m.timestamp) FILTER (WHERE m.added_to_cart = 1), e.timestamp) AS seconds_since_matured_cart FROM (SELECT DISTINCT visitorid, timestamp FROM eval_table) e LEFT JOIN matured_labels m ON m.visitorid = e.visitorid AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp GROUP BY e.visitorid, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "VisitorBrowsingPeriods",
+   "entity": "visitorid",
+   "max_rows_per_case": 2,
+   "fkeys": {},
+   "sql": "SELECT e.visitorid, e.timestamp, 0 AS period_index, COUNT(v.timestamp) AS views, COUNT(DISTINCT v.itemid) AS distinct_items FROM (SELECT DISTINCT visitorid, timestamp FROM eval_table) e LEFT JOIN View v ON v.visitorid = e.visitorid AND v.timestamp < e.timestamp AND v.timestamp >= e.timestamp - INTERVAL '1 hour' GROUP BY e.visitorid, e.timestamp UNION ALL SELECT e.visitorid, e.timestamp, 1 AS period_index, COUNT(v.timestamp) AS views, COUNT(DISTINCT v.itemid) AS distinct_items FROM (SELECT DISTINCT visitorid, timestamp FROM eval_table) e LEFT JOIN View v ON v.visitorid = e.visitorid AND v.timestamp < e.timestamp AND v.timestamp < e.timestamp - INTERVAL '1 hour' AND v.timestamp >= e.timestamp - INTERVAL '1 day' GROUP BY e.visitorid, e.timestamp"
+  },
+  {
+   "type": "derived_table",
+   "name": "VisitorItemCategoryIntent",
+   "entity": "visitorid",
+   "max_rows_per_case": 64,
+   "fkeys": {
+    "itemid": "Item"
+   },
+   "sql": "SELECT b.visitorid, b.itemid, b.timestamp, b.pair_views_all, b.pair_views_1h, b.pair_seconds_since_view, b.pair_views_1h * 1.0 / NULLIF(b.visitor_views_1h, 0) AS pair_view_share_1h, o.pair_matured_count, o.pair_matured_carts, a.category_view_share_1h FROM (SELECT e.visitorid, e.itemid, e.timestamp, COUNT(v.timestamp) FILTER (WHERE v.itemid = e.itemid) AS pair_views_all, COUNT(v.timestamp) FILTER (WHERE v.itemid = e.itemid AND v.timestamp >= e.timestamp - INTERVAL '1 hour') AS pair_views_1h, DATE_DIFF('second', MAX(v.timestamp) FILTER (WHERE v.itemid = e.itemid), e.timestamp) AS pair_seconds_since_view, COUNT(v.timestamp) FILTER (WHERE v.timestamp >= e.timestamp - INTERVAL '1 hour') AS visitor_views_1h FROM (SELECT d.visitorid, d.itemid, d.timestamp FROM (SELECT DISTINCT visitorid, itemid, timestamp FROM eval_table) d QUALIFY ROW_NUMBER() OVER (PARTITION BY d.visitorid, d.timestamp ORDER BY d.itemid) <= 64) e LEFT JOIN View v ON v.visitorid = e.visitorid AND v.timestamp < e.timestamp GROUP BY e.visitorid, e.itemid, e.timestamp) b JOIN (SELECT e.visitorid, e.itemid, e.timestamp, COUNT(m.timestamp) AS pair_matured_count, COALESCE(SUM(m.added_to_cart), 0) AS pair_matured_carts FROM (SELECT d.visitorid, d.itemid, d.timestamp FROM (SELECT DISTINCT visitorid, itemid, timestamp FROM eval_table) d QUALIFY ROW_NUMBER() OVER (PARTITION BY d.visitorid, d.timestamp ORDER BY d.itemid) <= 64) e LEFT JOIN matured_labels m ON m.visitorid = e.visitorid AND m.itemid = e.itemid AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp GROUP BY e.visitorid, e.itemid, e.timestamp) o ON o.visitorid = b.visitorid AND o.itemid = b.itemid AND o.timestamp = b.timestamp JOIN (SELECT e.visitorid, e.itemid, e.timestamp, CASE WHEN c.category IS NULL THEN NULL ELSE COALESCE(SUM(r.views_1h) FILTER (WHERE r.category = c.category), 0) * 1.0 / NULLIF(SUM(r.views_1h), 0) END AS category_view_share_1h FROM (SELECT d.visitorid, d.itemid, d.timestamp FROM (SELECT DISTINCT visitorid, itemid, timestamp FROM eval_table) d QUALIFY ROW_NUMBER() OVER (PARTITION BY d.visitorid, d.timestamp ORDER BY d.itemid) <= 64) e LEFT JOIN (SELECT ce.itemid, ce.timestamp, FIRST(ic.category ORDER BY ic.timestamp DESC NULLS LAST, ic.category DESC NULLS LAST) AS category FROM (SELECT DISTINCT itemid, timestamp FROM eval_table) ce LEFT JOIN ItemCategory ic ON ic.itemid = ce.itemid AND ic.timestamp < ce.timestamp GROUP BY ce.itemid, ce.timestamp) c ON c.itemid = e.itemid AND c.timestamp = e.timestamp LEFT JOIN (SELECT rv.visitorid, rv.timestamp, rv.itemid, rv.views_1h, FIRST(ic.category ORDER BY ic.timestamp DESC NULLS LAST, ic.category DESC NULLS LAST) AS category FROM (SELECT ve.visitorid, ve.timestamp, v.itemid, COUNT(v.timestamp) AS views_1h FROM (SELECT DISTINCT visitorid, timestamp FROM eval_table) ve JOIN View v ON v.visitorid = ve.visitorid AND v.timestamp < ve.timestamp AND v.timestamp >= ve.timestamp - INTERVAL '1 hour' GROUP BY ve.visitorid, ve.timestamp, v.itemid) rv LEFT JOIN ItemCategory ic ON ic.itemid = rv.itemid AND ic.timestamp < rv.timestamp GROUP BY rv.visitorid, rv.timestamp, rv.itemid, rv.views_1h) r ON r.visitorid = e.visitorid AND r.timestamp = e.timestamp GROUP BY e.visitorid, e.itemid, e.timestamp, c.category) a ON a.visitorid = b.visitorid AND a.itemid = b.itemid AND a.timestamp = b.timestamp"
+  }
+ ]
+}

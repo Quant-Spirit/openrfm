@@ -1,0 +1,60 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-trial",
+ "task": "study-outcome",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "studies",
+   "columns": [
+    "study_type",
+    "brief_title",
+    "phase",
+    "enrollment",
+    "enrollment_type",
+    "number_of_arms",
+    "number_of_groups",
+    "has_dmc",
+    "is_fda_regulated_drug",
+    "is_fda_regulated_device",
+    "source_class"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "studies__snapshot",
+   "entity": "nct_id",
+   "blocks": [
+    {
+     "name": "historical_analysis_evidence",
+     "sql": "SELECT e.nct_id, e.timestamp, COUNT(a.id) AS prior_analysis_count, COUNT(a.p_value) AS prior_p_value_count, MIN(a.p_value) AS prior_min_p_value, AVG(CASE WHEN a.p_value IS NOT NULL THEN CASE WHEN a.p_value <= 0.05 THEN 1.0 ELSE 0.0 END END) AS prior_significant_fraction, FIRST(a.p_value ORDER BY a.date DESC, a.id DESC) FILTER (WHERE a.p_value IS NOT NULL) AS latest_prior_p_value, DATE_DIFF('day', MAX(a.date), e.timestamp) AS days_since_prior_analysis, COUNT(a.id) FILTER (WHERE a.date >= e.timestamp - INTERVAL '365 days') AS prior_year_analysis_count, MIN(a.p_value) FILTER (WHERE a.date >= e.timestamp - INTERVAL '365 days') AS prior_year_min_p_value FROM eval_table e LEFT JOIN outcome_analyses a ON a.nct_id = e.nct_id AND a.date < e.timestamp GROUP BY e.nct_id, e.timestamp"
+    },
+    {
+     "name": "study_age",
+     "sql": "SELECT e.nct_id, e.timestamp, DATE_DIFF('day', s.start_date, e.timestamp) AS days_since_start FROM eval_table e LEFT JOIN studies s ON s.nct_id = e.nct_id AND s.start_date <= e.timestamp"
+    },
+    {
+     "name": "matured_peer_outcome_profiles",
+     "sql": "WITH shared AS (SELECT e.nct_id, e.timestamp, 'sponsor' AS kind, b.nct_id AS peer_nct_id FROM eval_table e JOIN sponsors_studies a ON a.nct_id = e.nct_id AND a.date < e.timestamp JOIN sponsors_studies b ON b.sponsor_id = a.sponsor_id AND b.nct_id <> e.nct_id AND b.date < e.timestamp UNION ALL SELECT e.nct_id, e.timestamp, 'condition' AS kind, b.nct_id AS peer_nct_id FROM eval_table e JOIN conditions_studies a ON a.nct_id = e.nct_id AND a.date < e.timestamp JOIN conditions_studies b ON b.condition_id = a.condition_id AND b.nct_id <> e.nct_id AND b.date < e.timestamp UNION ALL SELECT e.nct_id, e.timestamp, 'intervention' AS kind, b.nct_id AS peer_nct_id FROM eval_table e JOIN interventions_studies a ON a.nct_id = e.nct_id AND a.date < e.timestamp JOIN interventions_studies b ON b.intervention_id = a.intervention_id AND b.nct_id <> e.nct_id AND b.date < e.timestamp), memberships AS (SELECT DISTINCT nct_id, timestamp, kind, peer_nct_id FROM shared), donors AS (SELECT h.nct_id, h.timestamp, h.kind, h.peer_nct_id, m.timestamp AS peer_timestamp, m.label_window_end, m.outcome, p.phase = s.phase AS same_phase FROM memberships h JOIN studies p ON p.nct_id = h.peer_nct_id AND p.start_date < h.timestamp LEFT JOIN studies s ON s.nct_id = h.nct_id AND s.start_date <= h.timestamp JOIN matured_labels m ON m.nct_id = h.peer_nct_id AND m.nct_id <> h.nct_id AND m.timestamp < h.timestamp AND m.label_window_end < h.timestamp QUALIFY ROW_NUMBER() OVER (PARTITION BY h.nct_id, h.timestamp, h.kind, h.peer_nct_id ORDER BY m.timestamp DESC, m.label_window_end DESC, m.outcome DESC) = 1) SELECT e.nct_id, e.timestamp, COUNT(d.peer_nct_id) FILTER (WHERE d.kind = 'sponsor') AS sponsor_peer_count, AVG(d.outcome) FILTER (WHERE d.kind = 'sponsor') AS sponsor_peer_positive_rate, AVG(d.outcome) FILTER (WHERE d.kind = 'sponsor' AND d.label_window_end >= e.timestamp - INTERVAL '1095 days') AS sponsor_recent_positive_rate, AVG(d.outcome) FILTER (WHERE d.kind = 'sponsor' AND d.same_phase) AS sponsor_same_phase_positive_rate, COUNT(d.peer_nct_id) FILTER (WHERE d.kind = 'condition') AS condition_peer_count, AVG(d.outcome) FILTER (WHERE d.kind = 'condition') AS condition_peer_positive_rate, AVG(d.outcome) FILTER (WHERE d.kind = 'condition' AND d.label_window_end >= e.timestamp - INTERVAL '1095 days') AS condition_recent_positive_rate, AVG(d.outcome) FILTER (WHERE d.kind = 'condition' AND d.same_phase) AS condition_same_phase_positive_rate, COUNT(d.peer_nct_id) FILTER (WHERE d.kind = 'intervention') AS intervention_peer_count, AVG(d.outcome) FILTER (WHERE d.kind = 'intervention') AS intervention_peer_positive_rate, AVG(d.outcome) FILTER (WHERE d.kind = 'intervention' AND d.label_window_end >= e.timestamp - INTERVAL '1095 days') AS intervention_recent_positive_rate, AVG(d.outcome) FILTER (WHERE d.kind = 'intervention' AND d.same_phase) AS intervention_same_phase_positive_rate FROM eval_table e LEFT JOIN donors d ON d.nct_id = e.nct_id AND d.timestamp = e.timestamp GROUP BY e.nct_id, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "evidence_table",
+   "name": "study_latest_design",
+   "entity": "nct_id",
+   "source": "designs",
+   "fk": "nct_id",
+   "columns": [
+    "allocation",
+    "intervention_model",
+    "observational_model",
+    "primary_purpose",
+    "time_perspective",
+    "masking"
+   ],
+   "k": 1
+  }
+ ]
+}

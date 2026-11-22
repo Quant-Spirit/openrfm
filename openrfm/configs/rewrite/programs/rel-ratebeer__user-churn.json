@@ -1,0 +1,48 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-ratebeer",
+ "task": "user-churn",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "users",
+   "columns": [
+    "user_type"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "users__snapshot",
+   "entity": "user_id",
+   "blocks": [
+    {
+     "name": "profile_quantities",
+     "sql": "SELECT e.user_id, e.timestamp, u.beer_rating_count AS profile_beer_rating_count, u.avg_beer_rating AS profile_avg_beer_rating, u.max_beer_rating AS profile_max_beer_rating, u.min_beer_rating AS profile_min_beer_rating, u.place_rating_count AS profile_place_rating_count, u.avg_place_rating AS profile_avg_place_rating, u.favorite_count AS profile_favorite_count, u.total_activity_count AS profile_total_activity_count, DATE_DIFF('second', u.created_at, e.timestamp) / 86400.0 AS account_age_days, CASE WHEN u.updated_at < e.timestamp THEN DATE_DIFF('second', u.updated_at, e.timestamp) / 86400.0 END AS days_since_observed_profile_update FROM eval_table e LEFT JOIN users u ON u.user_id = e.user_id AND u.created_at <= e.timestamp"
+    },
+    {
+     "name": "rating_participation",
+     "sql": "SELECT e.user_id, e.timestamp, COUNT(r.rating_id) AS ratings_all, DATE_DIFF('second', MAX(r.created_at), e.timestamp) / 86400.0 AS days_since_last_rating, COUNT(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '7 days') AS ratings_7d, COUNT(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '30 days') AS ratings_30d, COUNT(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '90 days') AS ratings_90d, COUNT(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '365 days') AS ratings_365d, COUNT(r.rating_id) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '180 days' AND r.created_at < e.timestamp - INTERVAL '90 days') AS ratings_previous_90d, COUNT(DISTINCT CAST(r.created_at AS DATE)) FILTER (WHERE r.created_at >= e.timestamp - INTERVAL '90 days') AS active_days_90d FROM eval_table e LEFT JOIN beer_ratings r ON r.user_id = e.user_id AND r.created_at < e.timestamp GROUP BY e.user_id, e.timestamp"
+    },
+    {
+     "name": "personal_cadence",
+     "sql": "WITH activity_days AS (SELECT e.user_id, e.timestamp, CAST(r.created_at AS DATE) AS activity_day FROM eval_table e JOIN beer_ratings r ON r.user_id = e.user_id AND r.created_at < e.timestamp GROUP BY e.user_id, e.timestamp, CAST(r.created_at AS DATE)), gaps AS (SELECT user_id, timestamp, DATE_DIFF('day', LAG(activity_day) OVER (PARTITION BY user_id, timestamp ORDER BY activity_day), activity_day) AS gap_days FROM activity_days) SELECT e.user_id, e.timestamp, MEDIAN(g.gap_days) AS median_completed_gap_days FROM eval_table e LEFT JOIN gaps g ON g.user_id = e.user_id AND g.timestamp = e.timestamp GROUP BY e.user_id, e.timestamp"
+    },
+    {
+     "name": "other_engagement_recency",
+     "sql": "WITH activity AS (SELECT e.user_id, e.timestamp, p.created_at AS activity_time FROM eval_table e JOIN place_ratings p ON p.user_id = e.user_id AND p.created_at < e.timestamp UNION ALL SELECT e.user_id, e.timestamp, f.created_at AS activity_time FROM eval_table e JOIN favorites f ON f.user_id = e.user_id AND f.created_at < e.timestamp) SELECT e.user_id, e.timestamp, DATE_DIFF('second', MAX(a.activity_time), e.timestamp) / 86400.0 AS days_since_other_engagement FROM eval_table e LEFT JOIN activity a ON a.user_id = e.user_id AND a.timestamp = e.timestamp GROUP BY e.user_id, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "user_shared_beer_peer_outcomes",
+   "entity": "user_id",
+   "sql": "WITH recent_beers AS (SELECT e.user_id, e.timestamp, r.beer_id, MAX(r.created_at) AS last_own_rating_time FROM eval_table e JOIN beer_ratings r ON r.user_id = e.user_id AND r.created_at < e.timestamp AND r.created_at >= e.timestamp - INTERVAL '90 days' GROUP BY e.user_id, e.timestamp, r.beer_id QUALIFY ROW_NUMBER() OVER (PARTITION BY e.user_id, e.timestamp ORDER BY MAX(r.created_at) DESC, r.beer_id) <= 3), recent_coraters AS (SELECT b.user_id, b.timestamp, p.user_id AS peer_user_id, p.beer_id, p.created_at AS peer_rating_time FROM recent_beers b JOIN beer_ratings p ON p.beer_id = b.beer_id AND p.user_id <> b.user_id AND p.created_at < b.timestamp AND p.created_at >= b.timestamp - INTERVAL '90 days' QUALIFY ROW_NUMBER() OVER (PARTITION BY b.user_id, b.timestamp, b.beer_id ORDER BY p.created_at DESC, p.rating_id DESC) <= 16), pairs AS (SELECT user_id, timestamp, peer_user_id, COUNT(DISTINCT beer_id) AS shared_recent_beers, MAX(peer_rating_time) AS last_peer_rating_time FROM recent_coraters GROUP BY user_id, timestamp, peer_user_id), labeled_peers AS (SELECT p.user_id, p.timestamp, p.peer_user_id, p.shared_recent_beers, p.last_peer_rating_time, m.timestamp AS historical_cutoff, m.label_window_end, m.user_churn AS historical_peer_churn FROM pairs p JOIN matured_labels m ON m.user_id = p.peer_user_id AND m.timestamp < p.timestamp AND m.label_window_end < p.timestamp AND m.timestamp >= p.timestamp - INTERVAL '365 days' QUALIFY ROW_NUMBER() OVER (PARTITION BY p.user_id, p.timestamp, p.peer_user_id ORDER BY m.timestamp DESC, m.label_window_end DESC) = 1) SELECT user_id, timestamp, peer_user_id, shared_recent_beers, DATE_DIFF('second', last_peer_rating_time, timestamp) / 86400.0 AS days_since_peer_rating, historical_cutoff, historical_peer_churn, DATE_DIFF('second', label_window_end, timestamp) / 86400.0 AS days_since_peer_outcome_matured FROM labeled_peers QUALIFY ROW_NUMBER() OVER (PARTITION BY user_id, timestamp ORDER BY shared_recent_beers DESC, last_peer_rating_time DESC, peer_user_id) <= 3",
+   "max_rows_per_case": 3,
+   "fkeys": {
+    "peer_user_id": "users"
+   }
+  }
+ ]
+}

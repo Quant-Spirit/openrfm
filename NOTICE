@@ -1,0 +1,12 @@
+OpenRFM
+Copyright 2026 The OpenRFM Authors
+
+The following parts are derived from Relational Transformer
+(https://github.com/stanford-star/relational-transformer), copyright its authors, licensed under the Apache License,
+Version 2.0, and were modified by the OpenRFM Authors:
+
+  native/rustler/            archive converter (from relational-transformer/rustler)
+  openrfm/models/backbone/   relational transformer backbone (from relational-transformer/src)
+
+These parts remain under the Apache License, Version 2.0; see native/rustler/LICENSE and
+openrfm/models/backbone/LICENSE. All other files are under the MIT License in LICENSE.

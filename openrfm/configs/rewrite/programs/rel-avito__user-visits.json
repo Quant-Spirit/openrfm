@@ -1,0 +1,48 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-avito",
+ "task": "user-visits",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "UserInfo",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "UserInfo__snapshot",
+   "entity": "UserID",
+   "blocks": [
+    {
+     "name": "calendar",
+     "sql": "SELECT e.UserID, e.timestamp, EXTRACT('dow' FROM e.timestamp) AS dow FROM eval_table e"
+    },
+    {
+     "name": "visit_breadth_and_recency",
+     "sql": "SELECT e.UserID, e.timestamp, epoch(e.timestamp - MAX(v.ViewDate))/3600.0 AS visit_recency_hours, COUNT(DISTINCT v.AdID) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '1 day') AS distinct_ads_1d, COUNT(DISTINCT v.AdID) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '4 days') AS distinct_ads_4d, COUNT(DISTINCT v.AdID) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '16 days') AS distinct_ads_16d, COUNT(v.ViewDate) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '4 days') AS visits_4d, COUNT(DISTINCT CAST(v.ViewDate AS DATE)) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '16 days') AS visit_active_days_16d, COUNT(DISTINCT v.AdID) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '8 days' AND v.ViewDate < e.timestamp - INTERVAL '4 days') AS distinct_ads_previous_4d FROM eval_table e LEFT JOIN VisitStream v ON v.UserID = e.UserID AND v.ViewDate < e.timestamp GROUP BY e.UserID, e.timestamp"
+    },
+    {
+     "name": "search_intent",
+     "sql": "SELECT e.UserID, e.timestamp, COUNT(s.SearchDate) FILTER (WHERE s.SearchDate >= e.timestamp - INTERVAL '4 days') AS searches_4d, epoch(e.timestamp - MAX(s.SearchDate))/3600.0 AS search_recency_hours FROM eval_table e LEFT JOIN SearchInfo s ON s.UserID = e.UserID AND s.SearchDate < e.timestamp GROUP BY e.UserID, e.timestamp"
+    },
+    {
+     "name": "phone_intent",
+     "sql": "SELECT e.UserID, e.timestamp, COUNT(p.PhoneRequestDate) FILTER (WHERE p.PhoneRequestDate >= e.timestamp - INTERVAL '4 days') AS phone_requests_4d, epoch(e.timestamp - MAX(p.PhoneRequestDate))/3600.0 AS phone_recency_hours FROM eval_table e LEFT JOIN PhoneRequestsStream p ON p.UserID = e.UserID AND p.PhoneRequestDate < e.timestamp GROUP BY e.UserID, e.timestamp"
+    },
+    {
+     "name": "matured_user_outcomes",
+     "sql": "SELECT e.UserID, e.timestamp, COUNT(l.label_window_end) AS matured_windows, AVG(CAST(l.num_click AS DOUBLE)) AS matured_positive_fraction, ARG_MAX(CAST(l.num_click AS INTEGER), l.timestamp) AS latest_matured_outcome FROM eval_table e LEFT JOIN matured_labels l ON l.UserID = e.UserID AND l.timestamp < e.timestamp AND l.label_window_end < e.timestamp GROUP BY e.UserID, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "user_recent_browsing_sessions",
+   "entity": "UserID",
+   "sql": "WITH visits AS (SELECT e.UserID, e.timestamp, v.ViewDate, v.AdID, a.CategoryID FROM eval_table e JOIN VisitStream v ON v.UserID = e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '30 days' LEFT JOIN AdsInfo a ON a.AdID = v.AdID), preceding AS (SELECT *, LAG(ViewDate) OVER (PARTITION BY UserID, timestamp ORDER BY ViewDate) AS previous_view FROM visits), boundaries AS (SELECT *, CASE WHEN previous_view IS NULL OR ViewDate - previous_view > INTERVAL '30 minutes' THEN 1 ELSE 0 END AS starts_session FROM preceding), numbered AS (SELECT *, SUM(starts_session) OVER (PARTITION BY UserID, timestamp ORDER BY ViewDate RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS session_id FROM boundaries), sessions AS (SELECT UserID, timestamp, session_id, MIN(ViewDate) AS session_start, MAX(ViewDate) AS session_end, COUNT(*) AS visit_count, COUNT(DISTINCT AdID) AS distinct_ads, COUNT(DISTINCT CategoryID) AS distinct_categories FROM numbered GROUP BY UserID, timestamp, session_id), spaced AS (SELECT *, LAG(session_end) OVER (PARTITION BY UserID, timestamp ORDER BY session_id) AS previous_session_end FROM sessions), ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY UserID, timestamp ORDER BY session_end DESC, session_id DESC) AS recency_rank FROM spaced) SELECT UserID, timestamp, recency_rank, session_end AS session_end_time, epoch(timestamp - session_end)/3600.0 AS hours_since_session, epoch(session_end - session_start)/60.0 AS session_duration_minutes, visit_count, distinct_ads, distinct_categories, epoch(session_start - previous_session_end)/3600.0 AS preceding_gap_hours, (visit_count - distinct_ads)::DOUBLE / NULLIF(visit_count, 0) AS repeat_view_fraction FROM ranked WHERE recency_rank <= 4",
+   "max_rows_per_case": 4,
+   "fkeys": {}
+  }
+ ]
+}

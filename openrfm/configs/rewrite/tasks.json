@@ -1,0 +1,162 @@
+{
+ "rel-amazon/user-churn": {
+  "target": "churn",
+  "task_type": "classification",
+  "horizon_s": 7862400.0
+ },
+ "rel-amazon/item-churn": {
+  "target": "churn",
+  "task_type": "classification",
+  "horizon_s": 7862400.0
+ },
+ "rel-amazon/user-ltv": {
+  "target": "ltv",
+  "task_type": "regression",
+  "horizon_s": 7862400.0
+ },
+ "rel-amazon/item-ltv": {
+  "target": "ltv",
+  "task_type": "regression",
+  "horizon_s": 7862400.0
+ },
+ "rel-stack/user-engagement": {
+  "target": "contribution",
+  "task_type": "classification",
+  "horizon_s": 7862400.0
+ },
+ "rel-stack/user-badge": {
+  "target": "WillGetBadge",
+  "task_type": "classification",
+  "horizon_s": 7862400.0
+ },
+ "rel-stack/post-votes": {
+  "target": "popularity",
+  "task_type": "regression",
+  "horizon_s": 7862400.0
+ },
+ "rel-trial/study-outcome": {
+  "target": "outcome",
+  "task_type": "classification",
+  "horizon_s": 31536000.0
+ },
+ "rel-trial/study-adverse": {
+  "target": "num_of_adverse_events",
+  "task_type": "regression",
+  "horizon_s": 31536000.0
+ },
+ "rel-trial/site-success": {
+  "target": "success_rate",
+  "task_type": "regression",
+  "horizon_s": 31536000.0
+ },
+ "rel-f1/driver-dnf": {
+  "target": "did_not_finish",
+  "task_type": "classification",
+  "horizon_s": 2592000.0
+ },
+ "rel-f1/driver-top3": {
+  "target": "qualifying",
+  "task_type": "classification",
+  "horizon_s": 2592000.0
+ },
+ "rel-f1/driver-position": {
+  "target": "position",
+  "task_type": "regression",
+  "horizon_s": 5184000.0
+ },
+ "rel-hm/user-churn": {
+  "target": "churn",
+  "task_type": "classification",
+  "horizon_s": 604800.0
+ },
+ "rel-hm/item-sales": {
+  "target": "sales",
+  "task_type": "regression",
+  "horizon_s": 604800.0
+ },
+ "rel-event/user-repeat": {
+  "target": "target",
+  "task_type": "classification",
+  "horizon_s": 604800.0
+ },
+ "rel-event/user-ignore": {
+  "target": "target",
+  "task_type": "classification",
+  "horizon_s": 604800.0
+ },
+ "rel-event/user-attendance": {
+  "target": "target",
+  "task_type": "regression",
+  "horizon_s": 604800.0
+ },
+ "rel-avito/user-visits": {
+  "target": "num_click",
+  "task_type": "classification",
+  "horizon_s": 345600.0
+ },
+ "rel-avito/user-clicks": {
+  "target": "num_click",
+  "task_type": "classification",
+  "horizon_s": 345600.0
+ },
+ "rel-avito/ad-ctr": {
+  "target": "num_click",
+  "task_type": "regression",
+  "horizon_s": 345600.0
+ },
+ "rel-arxiv/paper-citation": {
+  "target": "cited",
+  "task_type": "classification",
+  "horizon_s": 15724800.0
+ },
+ "rel-arxiv/author-publication": {
+  "target": "publication_count",
+  "task_type": "regression",
+  "horizon_s": 15724800.0
+ },
+ "rel-ratebeer/beer-churn": {
+  "target": "rating_churn",
+  "task_type": "classification",
+  "horizon_s": 7776000.0
+ },
+ "rel-ratebeer/user-churn": {
+  "target": "user_churn",
+  "task_type": "classification",
+  "horizon_s": 7776000.0
+ },
+ "rel-ratebeer/brewer-dormant": {
+  "target": "dormant",
+  "task_type": "classification",
+  "horizon_s": 31536000.0
+ },
+ "rel-ratebeer/user-count": {
+  "target": "num_ratings",
+  "task_type": "regression",
+  "horizon_s": 7776000.0
+ },
+ "amazon-4db/user-churn": {
+  "target": "churn",
+  "task_type": "classification",
+  "horizon_s": 7948800
+ },
+ "outbrain-4db/ad-ctr": {
+  "target": "clicked",
+  "task_type": "classification",
+  "horizon_s": 1
+ },
+ "retailrocket-4db/item-cvr": {
+  "target": "added_to_cart",
+  "task_type": "classification",
+  "horizon_s": 1
+ },
+ "stackexchange-4db/post-upvote": {
+  "target": "Target",
+  "task_type": "classification",
+  "horizon_s": 31622400
+ },
+ "stackexchange-4db/user-churn": {
+  "target": "Target",
+  "task_type": "classification",
+  "horizon_s": 63158400
+ }
+}

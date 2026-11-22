@@ -1,0 +1,71 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-avito",
+ "task": "user-clicks",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "UserInfo",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "Category",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "Location",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "UserInfo__snapshot",
+   "entity": "UserID",
+   "blocks": [
+    {
+     "name": "visits",
+     "sql": "SELECT\n  e.UserID,\n  e.timestamp,\n  COUNT(v.ViewDate) AS visits_30d,\n  COUNT(v.ViewDate) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '4 days') AS visits_4d,\n  COUNT(v.ViewDate) FILTER (WHERE v.ViewDate >= e.timestamp - INTERVAL '1 day') AS visits_1d,\n  COUNT(DISTINCT v.AdID) AS distinct_ads_30d,\n  COUNT(DISTINCT v.IPID) AS distinct_ip_30d,\n  MIN(epoch(e.timestamp - v.ViewDate)/3600.0) AS hours_since_last_visit\nFROM eval_table e\nLEFT JOIN VisitStream v\n  ON v.UserID = e.UserID\n AND v.ViewDate < e.timestamp\n AND v.ViewDate >= e.timestamp - INTERVAL '30 days'\nGROUP BY 1,2"
+    },
+    {
+     "name": "searches",
+     "sql": "SELECT\n  e.UserID,\n  e.timestamp,\n  COUNT(si.SearchDate) AS searches_30d,\n  COUNT(si.SearchDate) FILTER (WHERE si.SearchDate >= e.timestamp - INTERVAL '4 days') AS searches_4d,\n  AVG(si.IsUserLoggedOn) AS avg_loggedon_30d,\n  COUNT(DISTINCT si.LocationID) AS distinct_loc_30d,\n  COUNT(DISTINCT si.CategoryID) AS distinct_cat_30d,\n  MIN(epoch(e.timestamp - si.SearchDate)/3600.0) AS hours_since_last_search\nFROM eval_table e\nLEFT JOIN SearchInfo si\n  ON si.UserID = e.UserID\n AND si.SearchDate < e.timestamp\n AND si.SearchDate >= e.timestamp - INTERVAL '30 days'\nGROUP BY 1,2"
+    },
+    {
+     "name": "click_totals",
+     "sql": "WITH sids AS (\n  SELECT e.UserID, e.timestamp, si.SearchID\n  FROM eval_table e\n  LEFT JOIN SearchInfo si\n    ON si.UserID = e.UserID\n   AND si.SearchDate < e.timestamp\n   AND si.SearchDate >= e.timestamp - INTERVAL '30 days'\n)\nSELECT\n  s.UserID,\n  s.timestamp,\n  COUNT(st.SearchDate) AS impressions_30d,\n  SUM(st.IsClick) AS clicks_30d,\n  SUM(st.IsClick) FILTER (WHERE st.SearchDate >= s.timestamp - INTERVAL '4 days') AS clicks_4d,\n  AVG(st.IsClick) AS ctr_30d,\n  AVG(st.Position) AS avg_pos_30d,\n  AVG(st.HistCTR) AS avg_histctr_30d,\n  MIN(st.Position) FILTER (WHERE st.IsClick = 1) AS best_click_pos_30d\nFROM sids s\nLEFT JOIN SearchStream st\n  ON st.SearchID = s.SearchID\n AND st.SearchDate < s.timestamp\n AND st.SearchDate >= s.timestamp - INTERVAL '30 days'\nGROUP BY 1,2"
+    },
+    {
+     "name": "click_dynamics",
+     "sql": "SELECT e.UserID, e.timestamp, COUNT(st.AdID) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '4 days') AS impressions_4d, COUNT(st.AdID) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '7 days') AS impressions_7d, COALESCE(SUM(st.IsClick) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '1 day'),0) AS clicks_1d, COALESCE(SUM(st.IsClick) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '2 days'),0) AS clicks_2d, COALESCE(SUM(st.IsClick) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '7 days'),0) AS clicks_7d, COALESCE(SUM(st.IsClick) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '14 days'),0) AS clicks_14d, COALESCE(SUM(st.IsClick) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '8 days' AND st.SearchDate < e.timestamp - INTERVAL '4 days'),0) AS clicks_previous_4d, AVG(st.IsClick) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '4 days') AS ctr_4d, AVG(st.HistCTR) FILTER (WHERE st.SearchDate >= e.timestamp - INTERVAL '4 days') AS avg_histctr_4d, MIN(epoch(e.timestamp - st.SearchDate)/3600.0) AS hours_since_impression, MIN(epoch(e.timestamp - st.SearchDate)/3600.0) FILTER (WHERE st.IsClick = 1) AS hours_since_click, COUNT(DISTINCT CAST(st.SearchDate AS DATE)) FILTER (WHERE st.IsClick = 1) AS click_days_30d, COUNT(DISTINCT si.SearchID) FILTER (WHERE st.IsClick = 1) AS clicked_searches_30d, COUNT(DISTINCT st.AdID) FILTER (WHERE st.IsClick = 1) AS clicked_ads_30d FROM eval_table e LEFT JOIN SearchInfo si ON si.UserID = e.UserID AND si.SearchDate < e.timestamp AND si.SearchDate >= e.timestamp - INTERVAL '30 days' LEFT JOIN SearchStream st ON st.SearchID = si.SearchID AND st.SearchDate < e.timestamp AND st.SearchDate >= e.timestamp - INTERVAL '30 days' GROUP BY e.UserID, e.timestamp"
+    },
+    {
+     "name": "matured_user_history",
+     "sql": "SELECT e.UserID, e.timestamp, COUNT(m.label_window_end) AS matured_windows_30d, AVG(CAST(m.num_click AS DOUBLE)) AS positive_window_fraction_30d, ARG_MAX(CAST(m.num_click AS INTEGER), m.timestamp) AS last_matured_window_positive, MIN(epoch(e.timestamp - m.label_window_end)/3600.0) AS hours_since_last_matured_window FROM eval_table e LEFT JOIN matured_labels m ON m.UserID = e.UserID AND m.timestamp < e.timestamp AND m.label_window_end < e.timestamp AND m.timestamp >= e.timestamp - INTERVAL '30 days' GROUP BY e.UserID, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "user_recent_searches",
+   "entity": "UserID",
+   "sql": "WITH sessions AS (SELECT e.UserID, e.timestamp, si.SearchID, si.SearchDate AS search_time, si.CategoryID, si.LocationID, si.IsUserLoggedOn, LENGTH(si.SearchQuery) AS query_length, epoch(e.timestamp - si.SearchDate)/3600.0 AS age_hours, COUNT(st.AdID) AS impressions, COALESCE(SUM(st.IsClick),0) AS clicks, COUNT(DISTINCT st.AdID) FILTER (WHERE st.IsClick = 1) AS distinct_clicked_ads, AVG(st.HistCTR) AS avg_histctr, MIN(st.Position) FILTER (WHERE st.IsClick = 1) AS best_click_position FROM eval_table e JOIN SearchInfo si ON si.UserID = e.UserID AND si.SearchDate < e.timestamp AND si.SearchDate >= e.timestamp - INTERVAL '30 days' LEFT JOIN SearchStream st ON st.SearchID = si.SearchID AND st.SearchDate < e.timestamp AND st.SearchDate >= e.timestamp - INTERVAL '30 days' GROUP BY e.UserID, e.timestamp, si.SearchID, si.SearchDate, si.CategoryID, si.LocationID, si.IsUserLoggedOn, si.SearchQuery), ranked AS (SELECT *, ROW_NUMBER() OVER (PARTITION BY UserID, timestamp ORDER BY search_time DESC, SearchID DESC) AS recency_rank FROM sessions) SELECT UserID, timestamp, search_time, CategoryID, LocationID, IsUserLoggedOn, query_length, age_hours, impressions, clicks, distinct_clicked_ads, avg_histctr, best_click_position, recency_rank FROM ranked WHERE recency_rank <= 12",
+   "max_rows_per_case": 12,
+   "fkeys": {
+    "CategoryID": "Category",
+    "LocationID": "Location"
+   }
+  },
+  {
+   "type": "derived_table",
+   "name": "user_four_day_history",
+   "entity": "UserID",
+   "sql": "WITH events AS (SELECT e.UserID, e.timestamp, si.SearchDate AS event_time, 0 AS kind, 0.0 AS click_value FROM eval_table e JOIN SearchInfo si ON si.UserID = e.UserID AND si.SearchDate < e.timestamp AND si.SearchDate >= e.timestamp - INTERVAL '28 days' UNION ALL SELECT e.UserID, e.timestamp, st.SearchDate AS event_time, 1 AS kind, COALESCE(st.IsClick,0) AS click_value FROM eval_table e JOIN SearchInfo si ON si.UserID = e.UserID AND si.SearchDate < e.timestamp JOIN SearchStream st ON st.SearchID = si.SearchID AND st.SearchDate < e.timestamp AND st.SearchDate >= e.timestamp - INTERVAL '28 days' UNION ALL SELECT e.UserID, e.timestamp, v.ViewDate AS event_time, 2 AS kind, 0.0 AS click_value FROM eval_table e JOIN VisitStream v ON v.UserID = e.UserID AND v.ViewDate < e.timestamp AND v.ViewDate >= e.timestamp - INTERVAL '28 days' UNION ALL SELECT e.UserID, e.timestamp, p.PhoneRequestDate AS event_time, 3 AS kind, 0.0 AS click_value FROM eval_table e JOIN PhoneRequestsStream p ON p.UserID = e.UserID AND p.PhoneRequestDate < e.timestamp AND p.PhoneRequestDate >= e.timestamp - INTERVAL '28 days'), bucketed AS (SELECT UserID, timestamp, CAST(CEIL(epoch(timestamp - event_time)/345600.0) - 1 AS INTEGER) AS period_index, COUNT(*) FILTER (WHERE kind = 0) AS searches, COUNT(*) FILTER (WHERE kind = 1) AS impressions, SUM(click_value) AS clicks, COUNT(*) FILTER (WHERE kind = 2) AS visits, COUNT(*) FILTER (WHERE kind = 3) AS phone_requests, COUNT(DISTINCT CAST(event_time AS DATE)) FILTER (WHERE kind = 1 AND click_value = 1) AS click_days FROM events GROUP BY UserID, timestamp, period_index) SELECT e.UserID, e.timestamp, r.period_index, COALESCE(b.searches,0) AS searches, COALESCE(b.impressions,0) AS impressions, COALESCE(b.clicks,0) AS clicks, COALESCE(b.clicks,0) > 1 AS multiple_clicks, COALESCE(b.visits,0) AS visits, COALESCE(b.phone_requests,0) AS phone_requests, COALESCE(b.click_days,0) AS click_days FROM eval_table e CROSS JOIN range(7) AS r(period_index) LEFT JOIN bucketed b ON b.UserID = e.UserID AND b.timestamp = e.timestamp AND b.period_index = r.period_index",
+   "max_rows_per_case": 7,
+   "fkeys": {}
+  }
+ ]
+}

@@ -1,0 +1,40 @@
+# Per task: database, archived task table, target column, task type, entity table and label window (seconds);
+# `indirect` lists foreign-key paths [event table, intermediate table, ..., entity table] whose event rows are also
+# reachable from the entity when contexts are sampled. Contexts follow the forecast view of the entity table, except
+# `view: history` (the matured label history without own-entity composition) and `view: entity_row` (a task row that
+# is its entity's own row: labels stay hidden and the cutoff includes that row's time).
+support_cap: 8192             # per split, label-mature TRAIN and VAL support rows
+expanded_support_cap: 32768   # per split, for a recipe cell with `support: expanded`
+tasks:
+  amazon-4db/user-churn: {db: amazon-4db, table: user-churn, target: churn, task_type: classification, entity_table: Customer, view: history, horizon_s: 7948800}
+  outbrain-4db/ad-ctr: {db: outbrain-4db, table: ad-ctr, target: clicked, task_type: classification, entity_table: Event, view: history, horizon_s: 1}
+  retailrocket-4db/item-cvr: {db: retailrocket-4db, table: item-cvr, target: added_to_cart, task_type: classification, entity_table: Item, view: history, horizon_s: 1}
+  stackexchange-4db/post-upvote: {db: stackexchange-4db, table: post-upvote, target: Target, task_type: classification, entity_table: Posts, view: entity_row, horizon_s: 31622400}
+  stackexchange-4db/user-churn: {db: stackexchange-4db, table: user-churn, target: Target, task_type: classification, entity_table: Users, horizon_s: 63158400}
+  rel-amazon/user-churn: {db: rel-amazon, table: user-churn, target: churn, task_type: classification, entity_table: customer, horizon_s: 7862400}
+  rel-amazon/item-churn: {db: rel-amazon, table: item-churn, target: churn, task_type: classification, entity_table: product, horizon_s: 7862400}
+  rel-amazon/user-ltv: {db: rel-amazon, table: user-ltv, target: ltv, task_type: regression, entity_table: customer, horizon_s: 7862400}
+  rel-amazon/item-ltv: {db: rel-amazon, table: item-ltv, target: ltv, task_type: regression, entity_table: product, horizon_s: 7862400}
+  rel-stack/user-engagement: {db: rel-stack, table: user-engagement, target: contribution, task_type: classification, entity_table: users, horizon_s: 7862400}
+  rel-stack/user-badge: {db: rel-stack, table: user-badge, target: WillGetBadge, task_type: classification, entity_table: users, horizon_s: 7862400}
+  rel-stack/post-votes: {db: rel-stack, table: post-votes, target: popularity, task_type: regression, entity_table: posts, horizon_s: 7862400}
+  rel-trial/study-outcome: {db: rel-trial, table: study-outcome, target: outcome, task_type: classification, entity_table: studies, horizon_s: 31536000}
+  rel-trial/study-adverse: {db: rel-trial, table: study-adverse, target: num_of_adverse_events, task_type: regression, entity_table: studies, horizon_s: 31536000}
+  rel-trial/site-success: {db: rel-trial, table: site-success, target: success_rate, task_type: regression, entity_table: facilities, horizon_s: 31536000}
+  rel-f1/driver-dnf: {db: rel-f1, table: driver-dnf, target: did_not_finish, task_type: classification, entity_table: drivers, horizon_s: 2592000}
+  rel-f1/driver-top3: {db: rel-f1, table: driver-top3, target: qualifying, task_type: classification, entity_table: drivers, horizon_s: 2592000}
+  rel-f1/driver-position: {db: rel-f1, table: driver-position, target: position, task_type: regression, entity_table: drivers, horizon_s: 5184000}
+  rel-hm/user-churn: {db: rel-hm, table: user-churn, target: churn, task_type: classification, entity_table: customer, horizon_s: 604800}
+  rel-hm/item-sales: {db: rel-hm, table: item-sales, target: sales, task_type: regression, entity_table: article, horizon_s: 604800}
+  rel-event/user-repeat: {db: rel-event, table: user-repeat, target: target, task_type: classification, entity_table: users, horizon_s: 604800}
+  rel-event/user-ignore: {db: rel-event, table: user-ignore, target: target, task_type: classification, entity_table: users, horizon_s: 604800}
+  rel-event/user-attendance: {db: rel-event, table: user-attendance, target: target, task_type: regression, entity_table: users, horizon_s: 604800}
+  rel-avito/user-visits: {db: rel-avito, table: user-visits, target: num_click, task_type: classification, entity_table: UserInfo, horizon_s: 345600, indirect: [[SearchStream, SearchInfo, UserInfo]]}
+  rel-avito/user-clicks: {db: rel-avito, table: user-clicks, target: num_click, task_type: classification, entity_table: UserInfo, horizon_s: 345600, indirect: [[SearchStream, SearchInfo, UserInfo]]}
+  rel-avito/ad-ctr: {db: rel-avito, table: ad-ctr, target: num_click, task_type: regression, entity_table: AdsInfo, horizon_s: 345600}
+  rel-arxiv/paper-citation: {db: rel-arxiv, table: paper-citation, target: cited, task_type: classification, entity_table: papers, horizon_s: 15724800}
+  rel-arxiv/author-publication: {db: rel-arxiv, table: author-publication, target: publication_count, task_type: regression, entity_table: authors, horizon_s: 15724800}
+  rel-ratebeer/beer-churn: {db: rel-ratebeer, table: beer-churn, target: rating_churn, task_type: classification, entity_table: beers, horizon_s: 7776000}
+  rel-ratebeer/user-churn: {db: rel-ratebeer, table: user-churn, target: user_churn, task_type: classification, entity_table: users, horizon_s: 7776000}
+  rel-ratebeer/brewer-dormant: {db: rel-ratebeer, table: brewer-dormant, target: dormant, task_type: classification, entity_table: brewers, horizon_s: 31536000}
+  rel-ratebeer/user-count: {db: rel-ratebeer, table: user-count, target: num_ratings, task_type: regression, entity_table: users, horizon_s: 7776000}

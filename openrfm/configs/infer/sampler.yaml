@@ -1,0 +1,67 @@
+# Context sampler of inference: the retrieval spec (openrfm.sampler.spec.RTRetrievalSpec) before the task view.
+retrieval:
+  version: 3
+  composition_algorithm: path_stream_v1
+  discovery_scales_with_length: true
+  stream_weight_policy: selectivity
+  extension_policy: typed_temporal_mix
+  protected_core_len: 1024
+  rw_extension_percent: 25
+  extension_time_unit_seconds: 86400
+  seed_block_policy: truncate_priority
+  walk_count: 32
+  walk_steps: 16
+  candidate_count: 256
+  seq_len_set: [1024]
+  local_cell_budget_set: [1024]
+  bfs_width_set: [16, 32, 64, 128]
+  recency_set: [0, 1]
+  label_visibility: strict_drop
+  label_horizon_seconds: null
+  support_contract: existing_donor_mask
+  traversal: two_stage
+  max_hops: 0
+  max_resident_dbs: 1
+  reserve_bytes: 8589934592
+  measure: false
+  peer_labels_per_1024: 32
+  seed_hops: 6
+  path_depth: 6
+  time_strata: 8
+  filler_percent: 0
+  own_label_rows: 32
+  path_quota_parent_rows: 1
+  path_quota_rows: 16
+  path_quota_member_rows: 4
+  path_quota_grandparent_rows: 1
+  path_quota_grandchild_rows: 2
+  path_quota_order: density
+  path_quota_share: 50
+  seed_tier_percent: 90
+  seed_local_rows: 4
+  seed_rank: shared
+  seed_fill: false
+  seed_local_policy: entity
+  seed_route_fanout: 64
+  seed_hide_labels: true
+  own_recent_first: true
+# Own-history policy applied on top of the retrieval spec; the length L sets seq_len_set, local_cell_budget_set and
+# protected_core_len = min(L, 1024).
+own_history:
+  own_recent_first: true
+  own_label_rows: 256
+  path_quota_rows: 64
+  path_quota_share: 90
+  seed_hide_labels: false
+  seed_tier_percent: 0
+  seed_fill: true
+  seed_local_rows: 0
+  seed_rank: walk
+  seed_route_fanout: 32
+  seed_balance: false
+  seed_local_policy: parents
+  seed_program_mature: false
+  seed_hop_cap: 1024
+  peer_extension_percent: 0
+  peer_extension_rows: 0
+  extension_labels_visible: false

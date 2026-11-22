@@ -1,0 +1,67 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "outbrain-4db",
+ "task": "ad-ctr",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "Event",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "PromotedContent",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "keep_table",
+   "table": "DocumentsMeta",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "PromotedContent__snapshot",
+   "entity": "ad_id",
+   "blocks": [
+    {
+     "name": "raw_hierarchical_performance",
+     "sql": "SELECT e.ad_id, e.timestamp, COUNT(h.clicked) FILTER (WHERE hp.ad_id = p.ad_id) AS ad_n, AVG(CAST(h.clicked AS DOUBLE)) FILTER (WHERE hp.ad_id = p.ad_id) AS ad_ctr, COUNT(h.clicked) FILTER (WHERE hp.ad_id = p.ad_id AND h.timestamp >= e.timestamp - INTERVAL '1 day') AS ad_n_1d, AVG(CAST(h.clicked AS DOUBLE)) FILTER (WHERE hp.ad_id = p.ad_id AND h.timestamp >= e.timestamp - INTERVAL '1 day') AS ad_ctr_1d, COUNT(h.clicked) FILTER (WHERE hp.campaign_id = p.campaign_id) AS campaign_n, AVG(CAST(h.clicked AS DOUBLE)) FILTER (WHERE hp.campaign_id = p.campaign_id) AS campaign_ctr, COUNT(h.clicked) FILTER (WHERE hp.campaign_id = p.campaign_id AND h.timestamp >= e.timestamp - INTERVAL '1 day') AS campaign_n_1d, AVG(CAST(h.clicked AS DOUBLE)) FILTER (WHERE hp.campaign_id = p.campaign_id AND h.timestamp >= e.timestamp - INTERVAL '1 day') AS campaign_ctr_1d, COUNT(h.clicked) FILTER (WHERE hp.advertiser_id = p.advertiser_id) AS advertiser_n, AVG(CAST(h.clicked AS DOUBLE)) FILTER (WHERE hp.advertiser_id = p.advertiser_id) AS advertiser_ctr, COUNT(h.clicked) FILTER (WHERE hp.document_id = p.document_id) AS promoted_document_n, AVG(CAST(h.clicked AS DOUBLE)) FILTER (WHERE hp.document_id = p.document_id) AS promoted_document_ctr FROM (SELECT DISTINCT ad_id, timestamp FROM eval_table) e JOIN PromotedContent p ON p.ad_id = e.ad_id LEFT JOIN PromotedContent hp ON hp.ad_id = p.ad_id OR hp.campaign_id = p.campaign_id OR hp.advertiser_id = p.advertiser_id OR hp.document_id = p.document_id LEFT JOIN matured_labels h ON h.ad_id = hp.ad_id AND h.timestamp < e.timestamp AND h.label_window_end < e.timestamp GROUP BY e.ad_id, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "snapshot_table",
+   "name": "Event__snapshot",
+   "entity": "display_id",
+   "blocks": [
+    {
+     "name": "reader_activity",
+     "sql": "SELECT e.display_id, e.timestamp, COUNT(v.uuid) AS reader_pageviews_7d, COUNT(v.uuid) FILTER (WHERE v.timestamp >= e.timestamp - INTERVAL '1 day') AS reader_pageviews_1d, EXTRACT(EPOCH FROM (e.timestamp - MAX(v.timestamp))) / 3600.0 AS reader_hours_since_last_pageview FROM (SELECT DISTINCT display_id, timestamp FROM eval_table) e JOIN Event f ON f.display_id = e.display_id AND f.timestamp <= e.timestamp LEFT JOIN Pageview v ON v.uuid = f.uuid AND v.timestamp < e.timestamp AND v.timestamp >= e.timestamp - INTERVAL '7 days' GROUP BY e.display_id, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "Event__reader_documents",
+   "entity": "display_id",
+   "max_rows_per_case": 3,
+   "fkeys": {
+    "document_id": "DocumentsMeta"
+   },
+   "sql": "WITH reading AS (SELECT e.display_id, e.timestamp, v.document_id, COUNT(*) AS document_views_7d, MAX(v.timestamp) AS last_view_time FROM (SELECT DISTINCT display_id, timestamp FROM eval_table) e JOIN Event f ON f.display_id = e.display_id AND f.timestamp <= e.timestamp JOIN Pageview v ON v.uuid = f.uuid AND v.timestamp < e.timestamp AND v.timestamp >= e.timestamp - INTERVAL '7 days' JOIN DocumentsMeta d ON d.document_id = v.document_id AND d.publish_time < e.timestamp GROUP BY e.display_id, e.timestamp, v.document_id) SELECT display_id, timestamp, document_id, document_views_7d, last_view_time FROM reading QUALIFY ROW_NUMBER() OVER (PARTITION BY display_id, timestamp ORDER BY last_view_time DESC, document_id ASC) <= 3"
+  },
+  {
+   "type": "derived_table",
+   "name": "Event__source_ad_history",
+   "entity": "display_id",
+   "max_rows_per_case": 4,
+   "fkeys": {
+    "ad_id": "PromotedContent"
+   },
+   "sql": "WITH peers AS (SELECT e.display_id, e.timestamp, h.ad_id, COUNT(h.clicked) AS source_ad_impressions_7d, SUM(h.clicked) AS source_ad_clicks_7d, AVG(CAST(h.clicked AS DOUBLE)) AS source_ad_ctr_7d, MAX(h.timestamp) AS last_outcome_time FROM (SELECT DISTINCT display_id, timestamp FROM eval_table) e JOIN Event f ON f.display_id = e.display_id AND f.timestamp <= e.timestamp JOIN Event he ON he.document_id = f.document_id AND he.display_id <> f.display_id AND he.timestamp < e.timestamp AND he.timestamp >= e.timestamp - INTERVAL '7 days' JOIN matured_labels h ON h.display_id = he.display_id AND h.timestamp < e.timestamp AND h.timestamp >= e.timestamp - INTERVAL '7 days' AND h.label_window_end < e.timestamp JOIN PromotedContent p ON p.ad_id = h.ad_id GROUP BY e.display_id, e.timestamp, h.ad_id) SELECT display_id, timestamp, ad_id, source_ad_impressions_7d, source_ad_clicks_7d, source_ad_ctr_7d, last_outcome_time FROM peers QUALIFY ROW_NUMBER() OVER (PARTITION BY display_id, timestamp ORDER BY last_outcome_time DESC, ad_id ASC) <= 4"
+  }
+ ]
+}

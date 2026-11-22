@@ -1,0 +1,44 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "stackexchange-4db",
+ "task": "user-churn",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "Users",
+   "columns": "all",
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "Users__snapshot",
+   "entity": "Id",
+   "blocks": [
+    {
+     "name": "account_tenure",
+     "sql": "SELECT e.Id, e.Timestamp, date_diff('day', u.CreationDate, e.Timestamp) AS account_age_days FROM eval_table e LEFT JOIN Users u ON u.Id = e.Id AND u.CreationDate <= e.Timestamp"
+    },
+    {
+     "name": "activity_and_cadence",
+     "sql": "WITH activity AS (SELECT e.Id, e.Timestamp, p.CreationDate AS activity_time, 1 AS source_kind, p.PostTypeId AS post_type FROM eval_table e JOIN Posts p ON p.OwnerUserId = e.Id AND p.CreationDate < e.Timestamp UNION ALL SELECT e.Id, e.Timestamp, c.CreationDate AS activity_time, 2 AS source_kind, NULL AS post_type FROM eval_table e JOIN Comments c ON c.UserId = e.Id AND c.CreationDate < e.Timestamp), totals AS (SELECT e.Id, e.Timestamp, COUNT(a.activity_time) FILTER (WHERE a.source_kind = 1) AS posts_all_time, COUNT(a.activity_time) FILTER (WHERE a.source_kind = 2) AS comments_all_time, COUNT(a.activity_time) FILTER (WHERE a.activity_time >= e.Timestamp - INTERVAL '30 days') AS contributions_30d, COUNT(a.activity_time) FILTER (WHERE a.activity_time >= e.Timestamp - INTERVAL '90 days') AS contributions_90d, COUNT(a.activity_time) FILTER (WHERE a.activity_time >= e.Timestamp - INTERVAL '365 days') AS contributions_365d, COUNT(a.activity_time) FILTER (WHERE a.activity_time >= e.Timestamp - INTERVAL '730 days' AND a.activity_time < e.Timestamp - INTERVAL '365 days') AS contributions_previous_365d, COUNT(DISTINCT CAST(a.activity_time AS DATE)) FILTER (WHERE a.activity_time >= e.Timestamp - INTERVAL '365 days') AS active_days_365d, COUNT(DISTINCT CAST(a.activity_time AS DATE)) AS active_days_all_time, date_diff('second', MAX(a.activity_time), e.Timestamp) / 86400.0 AS days_since_last_activity, COUNT(a.activity_time) FILTER (WHERE a.source_kind = 1 AND a.post_type = 2) * 1.0 / NULLIF(COUNT(a.activity_time) FILTER (WHERE a.source_kind = 1), 0) AS answer_share FROM eval_table e LEFT JOIN activity a ON a.Id = e.Id AND a.Timestamp = e.Timestamp AND a.activity_time < e.Timestamp GROUP BY e.Id, e.Timestamp), days AS (SELECT DISTINCT Id, Timestamp, CAST(activity_time AS DATE) AS active_day FROM activity), gaps AS (SELECT Id, Timestamp, active_day, date_diff('day', LAG(active_day) OVER (PARTITION BY Id, Timestamp ORDER BY active_day), active_day) AS gap_days FROM days), cadence AS (SELECT Id, Timestamp, MEDIAN(gap_days) AS median_active_day_gap_days, arg_max(gap_days, active_day) AS latest_active_day_gap_days FROM gaps GROUP BY Id, Timestamp) SELECT t.Id, t.Timestamp, t.posts_all_time, t.comments_all_time, t.contributions_30d, t.contributions_90d, t.contributions_365d, t.contributions_previous_365d, t.active_days_365d, t.active_days_all_time, t.days_since_last_activity, t.answer_share, c.median_active_day_gap_days, c.latest_active_day_gap_days FROM totals t LEFT JOIN cadence c ON c.Id = t.Id AND c.Timestamp = t.Timestamp"
+    },
+    {
+     "name": "badge_commitment",
+     "sql": "SELECT e.Id, e.Timestamp, COUNT(b.Id) AS badges_all_time FROM eval_table e LEFT JOIN Badges b ON b.UserId = e.Id AND b.Date < e.Timestamp GROUP BY e.Id, e.Timestamp"
+    },
+    {
+     "name": "recent_received_feedback",
+     "sql": "SELECT e.Id, e.Timestamp, COUNT(v.Id) AS votes_received_90d, COUNT(v.Id) FILTER (WHERE v.VoteTypeId = 3) * 1.0 / NULLIF(COUNT(v.Id) FILTER (WHERE v.VoteTypeId IN (2, 3)), 0) AS downvote_received_rate_90d FROM eval_table e LEFT JOIN Posts p ON p.OwnerUserId = e.Id AND p.CreationDate < e.Timestamp LEFT JOIN Vote v ON v.PostId = p.Id AND v.CreationDate < e.Timestamp AND v.CreationDate >= e.Timestamp - INTERVAL '90 days' GROUP BY e.Id, e.Timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "user_recent_active_days",
+   "entity": "Id",
+   "max_rows_per_case": 4,
+   "fkeys": {},
+   "sql": "WITH activity AS (SELECT e.Id, e.Timestamp, p.CreationDate AS activity_time, CASE WHEN p.PostTypeId = 1 THEN 1 WHEN p.PostTypeId = 2 THEN 2 ELSE 3 END AS activity_kind FROM eval_table e JOIN Posts p ON p.OwnerUserId = e.Id AND p.CreationDate < e.Timestamp UNION ALL SELECT e.Id, e.Timestamp, c.CreationDate AS activity_time, 4 AS activity_kind FROM eval_table e JOIN Comments c ON c.UserId = e.Id AND c.CreationDate < e.Timestamp), daily AS (SELECT Id, Timestamp, CAST(activity_time AS DATE) AS active_day, COUNT(*) AS contributions, COUNT(*) FILTER (WHERE activity_kind = 1) AS questions, COUNT(*) FILTER (WHERE activity_kind = 2) AS answers, COUNT(*) FILTER (WHERE activity_kind = 4) AS comments FROM activity GROUP BY Id, Timestamp, CAST(activity_time AS DATE)), ordered AS (SELECT *, date_diff('day', LAG(active_day) OVER (PARTITION BY Id, Timestamp ORDER BY active_day), active_day) AS preceding_gap_days, ROW_NUMBER() OVER (PARTITION BY Id, Timestamp ORDER BY active_day DESC) AS recency_rank FROM daily) SELECT Id, Timestamp, active_day, contributions, questions, answers, comments, preceding_gap_days FROM ordered WHERE recency_rank <= 4"
+  }
+ ]
+}

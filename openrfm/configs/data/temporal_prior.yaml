@@ -1,0 +1,5 @@
+schema_version: 1
+kind: temporal_prior
+# Share of future-window worlds whose label publication times are jittered (irregular clocks).
+irregular_clock_share: 0.50
+label_publication_jitter_fraction_range: [0.05, 0.45]

@@ -1,0 +1,58 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-event",
+ "task": "user-attendance",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "users",
+   "columns": [
+    "locale",
+    "gender",
+    "location",
+    "birthyear",
+    "timezone"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "users__snapshot",
+   "entity": "user",
+   "blocks": [
+    {
+     "name": "user_profile",
+     "sql": "SELECT e.user, e.timestamp,\n       u.birthyear, (EXTRACT(year FROM e.timestamp) - u.birthyear) AS age,\n       u.timezone, u.gender, u.locale\nFROM eval_table e\nLEFT JOIN users u ON u.user_id = e.user"
+    },
+    {
+     "name": "past_counts_multiwin",
+     "sql": "SELECT e.user, e.timestamp,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '7 days'  AND a.start_time < e.timestamp)  AS yesmaybe_7d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '14 days' AND a.start_time < e.timestamp)  AS yesmaybe_14d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '30 days' AND a.start_time < e.timestamp)  AS yesmaybe_30d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '60 days' AND a.start_time < e.timestamp)  AS yesmaybe_60d,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp)  AS yesmaybe_90d,\n  COUNT(*) FILTER (WHERE a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp) AS any_90d\nFROM eval_table e\nLEFT JOIN event_attendees a\n  ON a.user_id = e.user\nGROUP BY e.user, e.timestamp"
+    },
+    {
+     "name": "rates_and_recency",
+     "sql": "WITH base AS (\n  SELECT e.user, e.timestamp,\n    COUNT(*) FILTER (WHERE a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp) AS any_90d,\n    COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= e.timestamp - INTERVAL '90 days' AND a.start_time < e.timestamp) AS yesmaybe_90d,\n    MIN(date_diff('day', a.start_time, e.timestamp)) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time < e.timestamp) AS dsl_yesmaybe\n  FROM eval_table e\n  LEFT JOIN event_attendees a ON a.user_id=e.user\n  GROUP BY e.user, e.timestamp\n)\nSELECT user, timestamp,\n  CASE WHEN any_90d=0 THEN 0.0 ELSE 1.0*yesmaybe_90d/any_90d END AS rate_yesmaybe_90d_filled,\n  COALESCE(dsl_yesmaybe, 9999) AS days_since_last_yesmaybe_filled,\n  CASE WHEN COALESCE(dsl_yesmaybe, 9999) <= 7 THEN 1 ELSE 0 END AS active_yesmaybe_7d\nFROM base"
+    },
+    {
+     "name": "friend_degree",
+     "sql": "SELECT e.user, e.timestamp, COUNT(DISTINCT uf.friend) AS n_friends\nFROM eval_table e\nLEFT JOIN user_friends uf ON uf.user=e.user\nGROUP BY e.user, e.timestamp"
+    },
+    {
+     "name": "friend_activity_90d",
+     "sql": "WITH fe AS (\n  SELECT e.user, e.timestamp, uf.friend AS friend_id\n  FROM eval_table e\n  LEFT JOIN user_friends uf ON uf.user=e.user\n)\nSELECT fe.user, fe.timestamp,\n  COUNT(*) FILTER (WHERE a.status IN ('yes','maybe') AND a.start_time >= fe.timestamp - INTERVAL '90 days' AND a.start_time < fe.timestamp) AS friends_yesmaybe_90d\nFROM fe\nLEFT JOIN event_attendees a ON a.user_id=fe.friend_id\nGROUP BY fe.user, fe.timestamp"
+    },
+    {
+     "name": "event_interest_signals",
+     "sql": "SELECT e.user, e.timestamp,\n  COUNT(*) FILTER (WHERE i.timestamp >= e.timestamp - INTERVAL '30 days' AND i.timestamp < e.timestamp AND i.interested=1) AS interest_30d\nFROM eval_table e\nLEFT JOIN event_interest i ON i.user=e.user\nGROUP BY e.user, e.timestamp"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "user_event_evidence",
+   "entity": "user",
+   "sql": "WITH current_cases AS (SELECT row_number() OVER (ORDER BY \"user\", \"timestamp\") - 1 AS case_id, \"user\" AS original_id, \"timestamp\" AS cutoff FROM (SELECT DISTINCT \"user\", \"timestamp\" FROM eval_table)), evidence_rows AS (WITH att AS (\n  SELECT c.case_id AS \"user\", 0 AS kind, a.status AS status, a.event AS event, date_diff('second',a.start_time,c.cutoff)/86400.0 AS age_days\n  FROM current_cases c JOIN event_attendees a ON a.user_id=c.original_id\n  QUALIFY row_number() OVER (PARTITION BY c.case_id ORDER BY a.start_time DESC, a.event, a)<=24\n), itr AS (\n  SELECT c.case_id AS \"user\", 1 AS kind, NULL AS status, i.event AS event, date_diff('second',i.timestamp,c.cutoff)/86400.0 AS age_days,\n         i.invited, i.interested, i.not_interested\n  FROM current_cases c JOIN event_interest i ON i.\"user\"=c.original_id\n  QUALIFY row_number() OVER (PARTITION BY c.case_id ORDER BY i.timestamp DESC, i.event, i)<=8\n), rows_ AS (\n  SELECT \"user\",kind,status,event,age_days,NULL::BIGINT AS invited,NULL::BIGINT AS interested,NULL::BIGINT AS not_interested FROM att\n  UNION ALL SELECT \"user\",kind,status,event,age_days,invited,interested,not_interested FROM itr\n)\nSELECT r.\"user\", r.kind, r.age_days, r.status, r.invited, r.interested, r.not_interested,\n       ev.state AS event_state, ev.city AS event_city, ev.c_1 AS event_c1, ev.c_2 AS event_c2, ev.c_3 AS event_c3,\n       (COALESCE(ev.c_1,0)+COALESCE(ev.c_2,0)+COALESCE(ev.c_3,0)+COALESCE(ev.c_4,0)+COALESCE(ev.c_5,0)+COALESCE(ev.c_6,0)+COALESCE(ev.c_7,0)+COALESCE(ev.c_8,0)+COALESCE(ev.c_9,0)+COALESCE(ev.c_10,0)+COALESCE(ev.c_11,0)+COALESCE(ev.c_12,0)+COALESCE(ev.c_13,0)+COALESCE(ev.c_14,0)+COALESCE(ev.c_15,0)+COALESCE(ev.c_16,0)+COALESCE(ev.c_17,0)+COALESCE(ev.c_18,0)+COALESCE(ev.c_19,0)+COALESCE(ev.c_20,0)+COALESCE(ev.c_21,0)+COALESCE(ev.c_22,0)+COALESCE(ev.c_23,0)+COALESCE(ev.c_24,0)+COALESCE(ev.c_25,0)+COALESCE(ev.c_26,0)+COALESCE(ev.c_27,0)+COALESCE(ev.c_28,0)+COALESCE(ev.c_29,0)+COALESCE(ev.c_30,0)+COALESCE(ev.c_31,0)+COALESCE(ev.c_32,0)+COALESCE(ev.c_33,0)+COALESCE(ev.c_34,0)+COALESCE(ev.c_35,0)+COALESCE(ev.c_36,0)+COALESCE(ev.c_37,0)+COALESCE(ev.c_38,0)+COALESCE(ev.c_39,0)+COALESCE(ev.c_40,0)+COALESCE(ev.c_41,0)+COALESCE(ev.c_42,0)+COALESCE(ev.c_43,0)+COALESCE(ev.c_44,0)+COALESCE(ev.c_45,0)+COALESCE(ev.c_46,0)+COALESCE(ev.c_47,0)+COALESCE(ev.c_48,0)+COALESCE(ev.c_49,0)+COALESCE(ev.c_50,0)+COALESCE(ev.c_51,0)+COALESCE(ev.c_52,0)+COALESCE(ev.c_53,0)+COALESCE(ev.c_54,0)+COALESCE(ev.c_55,0)+COALESCE(ev.c_56,0)+COALESCE(ev.c_57,0)+COALESCE(ev.c_58,0)+COALESCE(ev.c_59,0)+COALESCE(ev.c_60,0)+COALESCE(ev.c_61,0)+COALESCE(ev.c_62,0)+COALESCE(ev.c_63,0)+COALESCE(ev.c_64,0)+COALESCE(ev.c_65,0)+COALESCE(ev.c_66,0)+COALESCE(ev.c_67,0)+COALESCE(ev.c_68,0)+COALESCE(ev.c_69,0)+COALESCE(ev.c_70,0)+COALESCE(ev.c_71,0)+COALESCE(ev.c_72,0)+COALESCE(ev.c_73,0)+COALESCE(ev.c_74,0)+COALESCE(ev.c_75,0)+COALESCE(ev.c_76,0)+COALESCE(ev.c_77,0)+COALESCE(ev.c_78,0)+COALESCE(ev.c_79,0)+COALESCE(ev.c_80,0)+COALESCE(ev.c_81,0)+COALESCE(ev.c_82,0)+COALESCE(ev.c_83,0)+COALESCE(ev.c_84,0)+COALESCE(ev.c_85,0)+COALESCE(ev.c_86,0)+COALESCE(ev.c_87,0)+COALESCE(ev.c_88,0)+COALESCE(ev.c_89,0)+COALESCE(ev.c_90,0)+COALESCE(ev.c_91,0)+COALESCE(ev.c_92,0)+COALESCE(ev.c_93,0)+COALESCE(ev.c_94,0)+COALESCE(ev.c_95,0)+COALESCE(ev.c_96,0)+COALESCE(ev.c_97,0)+COALESCE(ev.c_98,0)+COALESCE(ev.c_99,0)+COALESCE(ev.c_100,0)) AS event_words\nFROM rows_ r LEFT JOIN events ev ON ev.event_id=r.event) SELECT c.original_id AS \"user\", c.cutoff AS \"timestamp\", l.* EXCLUDE (\"user\") FROM evidence_rows l JOIN current_cases c ON c.case_id = l.\"user\"",
+   "max_rows_per_case": 32,
+   "fkeys": {}
+  }
+ ]
+}

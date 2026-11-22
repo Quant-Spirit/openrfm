@@ -1,0 +1,67 @@
+# Memory-module training (`python -m openrfm.train.memory`).
+seed: 1105
+updates: 2500
+updates_per_world: 40
+checkpoint_every: 100
+log_every: 10
+data: openrfm/configs/data/memory_worlds.yaml       # world groups (mix) and the stream generator
+prior: openrfm/configs/data/temporal_prior.yaml
+llm_bank: openrfm/configs/train/memory_llm_bank.json
+inputs:
+  rustler: rustler                                  # cargo install --path native/rustler
+  # Backbone-corpus archives replayed as the corpus_replay group and the selection that lists them, under --corpus
+  # (written by `openrfm train backbone fetch`).
+  replay_archives: corpus
+  replay_selection: corpus/replay_selection.json
+memory: {queries: 64, head_width: 32, rows: 256, hops: 5, d_model: 128, depths: 7, chunk: 64, target_depths: [3, 6]}
+optimizer: {lr: 0.003, weight_decay: 0.01}
+# Frozen backbone columns are computed once per world for `rows` task rows, from contexts of `length` cells.
+backbone_context: {length: 1024, rows: 1152}
+objective:
+  consumer_size: small                     # frozen Kumo-Tabular heads, FP32
+  support: [128, 256, 512, 1024]           # support size K, drawn per update
+  query: 128
+  programs: 64                             # label programs drawn per past/future program task
+  scoped_share: 0.75
+  count_share: 0.5
+  program_groups: 13
+  forward_days: 365.0
+  llm_programs: 128                        # the bank keeps 2x this many target columns per world
+  # Groups whose labels do not depend on history train on the world's own task only.
+  own_task_only: [near_signal, silent_signal]
+# Context composer policy of the backbone contexts (openrfm.sampler.spec.RTRetrievalSpec); a forecast task reads its
+# matured label history.
+sampler:
+  version: 3
+  composition_algorithm: path_stream_v1
+  discovery_scales_with_length: true
+  stream_weight_policy: selectivity
+  extension_policy: typed_temporal_mix
+  protected_core_len: 1024
+  rw_extension_percent: 25
+  extension_time_unit_seconds: 86400
+  seed_block_policy: truncate_priority
+  walk_count: 32
+  walk_steps: 16
+  candidate_count: 256
+  seq_len_set: [1024]
+  local_cell_budget_set: [1024]
+  bfs_width_set: [16, 32, 64, 128]
+  recency_set: [0, 1]
+  label_visibility: strict_drop
+  label_horizon_seconds: null
+  support_contract: existing_donor_mask
+  traversal: two_stage
+  max_hops: 0
+  max_resident_dbs: 1
+  reserve_bytes: 8589934592
+  measure: false
+  peer_labels_per_1024: 32
+  seed_hops: 6
+  path_depth: 6
+  time_strata: 8
+  filler_percent: 0
+  support_label_horizon_safe: true
+  own_label_rows: 64
+  path_quota_rows: 64
+  path_quota_share: 60

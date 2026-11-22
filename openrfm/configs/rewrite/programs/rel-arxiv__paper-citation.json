@@ -1,0 +1,50 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-arxiv",
+ "task": "paper-citation",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "papers",
+   "columns": [
+    "Title",
+    "Abstract",
+    "Primary_Category_ID"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "papers__snapshot",
+   "entity": "Paper_ID",
+   "blocks": [
+    {
+     "name": "age_and_citation_momentum",
+     "sql": "SELECT t.Paper_ID, t.date, DATE_DIFF('day', p.Submission_Date, t.date) AS paper_age_days, COUNT(c.Paper_ID) AS total_cites_before, COUNT(c.Paper_ID) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '30 days') AS cites_30d, COUNT(c.Paper_ID) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '180 days') AS cites_180d, COUNT(c.Paper_ID) FILTER (WHERE c.Submission_Date >= t.date - INTERVAL '360 days' AND c.Submission_Date < t.date - INTERVAL '180 days') AS cites_previous_180d, DATE_DIFF('day', MAX(c.Submission_Date), t.date) AS days_since_latest_cite, CAST(COUNT(c.Paper_ID) AS DOUBLE) / NULLIF(DATE_DIFF('second', p.Submission_Date, t.date) / 86400.0, 0) AS cites_per_day_life FROM eval_table t LEFT JOIN papers p ON p.Paper_ID = t.Paper_ID AND p.Submission_Date <= t.date LEFT JOIN citations c ON c.References_Paper_ID = t.Paper_ID AND c.Submission_Date < t.date GROUP BY t.Paper_ID, t.date, p.Submission_Date"
+    },
+    {
+     "name": "author_activity",
+     "sql": "SELECT t.Paper_ID, t.date, COUNT(h.Author_ID) AS n_authors, COALESCE(AVG(h.prior_papers), 0) AS avg_author_prior_papers, COALESCE(MAX(h.cites_180d), 0) AS max_author_other_paper_cites_180d FROM eval_table t LEFT JOIN (SELECT a.Paper_ID, a.date, a.Author_ID, COUNT(DISTINCT a.prior_paper_id) AS prior_papers, COUNT(c.Paper_ID) AS cites_180d FROM (SELECT DISTINCT e.Paper_ID, e.date, f.Author_ID, b.Paper_ID AS prior_paper_id FROM eval_table e JOIN paperAuthors f ON f.Paper_ID = e.Paper_ID AND f.Submission_Date < e.date LEFT JOIN paperAuthors b ON b.Author_ID = f.Author_ID AND b.Paper_ID <> e.Paper_ID AND b.Submission_Date < e.date) a LEFT JOIN citations c ON c.References_Paper_ID = a.prior_paper_id AND c.Submission_Date < a.date AND c.Submission_Date >= a.date - INTERVAL '180 days' GROUP BY a.Paper_ID, a.date, a.Author_ID) h ON h.Paper_ID = t.Paper_ID AND h.date = t.date GROUP BY t.Paper_ID, t.date"
+    },
+    {
+     "name": "reference_influence",
+     "sql": "SELECT t.Paper_ID, t.date, COUNT(h.ref_paper_id) AS n_unique_references, COALESCE(AVG(h.incoming_cites), 0) AS avg_reference_cites_before, COALESCE(AVG(h.incoming_cites_180d), 0) AS avg_reference_cites_180d FROM eval_table t LEFT JOIN (SELECT r.Paper_ID, r.date, r.ref_paper_id, COUNT(c.Paper_ID) AS incoming_cites, COUNT(c.Paper_ID) FILTER (WHERE c.Submission_Date >= r.date - INTERVAL '180 days') AS incoming_cites_180d FROM (SELECT DISTINCT e.Paper_ID, e.date, b.References_Paper_ID AS ref_paper_id FROM eval_table e JOIN citations b ON b.Paper_ID = e.Paper_ID AND b.Submission_Date < e.date) r LEFT JOIN citations c ON c.References_Paper_ID = r.ref_paper_id AND c.Submission_Date < r.date GROUP BY r.Paper_ID, r.date, r.ref_paper_id) h ON h.Paper_ID = t.Paper_ID AND h.date = t.date GROUP BY t.Paper_ID, t.date"
+    },
+    {
+     "name": "category_activity",
+     "sql": "SELECT t.Paper_ID, t.date, COUNT(DISTINCT p.Paper_ID) AS category_prior_papers, CAST(COUNT(c.Paper_ID) AS DOUBLE) / NULLIF(COUNT(DISTINCT p.Paper_ID), 0) AS category_cites_180d_per_paper FROM eval_table t LEFT JOIN papers f ON f.Paper_ID = t.Paper_ID AND f.Submission_Date <= t.date LEFT JOIN papers p ON p.Primary_Category_ID = f.Primary_Category_ID AND p.Submission_Date < t.date LEFT JOIN citations c ON c.References_Paper_ID = p.Paper_ID AND c.Submission_Date < t.date AND c.Submission_Date >= t.date - INTERVAL '180 days' GROUP BY t.Paper_ID, t.date"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "paper_recent_citing_papers",
+   "entity": "Paper_ID",
+   "sql": "SELECT r.Paper_ID, r.date, r.Citing_Paper_ID, r.Citation_Date, COUNT(DISTINCT c.References_Paper_ID) AS citing_paper_reference_count FROM (SELECT e.Paper_ID, e.date, e.Citing_Paper_ID, e.Citation_Date FROM (SELECT DISTINCT t.Paper_ID, t.date, b.Paper_ID AS Citing_Paper_ID, b.Submission_Date AS Citation_Date FROM eval_table t JOIN citations b ON b.References_Paper_ID = t.Paper_ID AND b.Submission_Date < t.date JOIN papers p ON p.Paper_ID = b.Paper_ID AND p.Submission_Date < t.date) e QUALIFY ROW_NUMBER() OVER (PARTITION BY e.Paper_ID, e.date ORDER BY e.Citation_Date DESC, e.Citing_Paper_ID) <= 2) r LEFT JOIN citations c ON c.Paper_ID = r.Citing_Paper_ID AND c.Submission_Date < r.date GROUP BY r.Paper_ID, r.date, r.Citing_Paper_ID, r.Citation_Date",
+   "max_rows_per_case": 2,
+   "fkeys": {
+    "Citing_Paper_ID": "papers"
+   }
+  }
+ ]
+}

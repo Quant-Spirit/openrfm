@@ -1,0 +1,216 @@
+# World counts by family for synthetic pretraining.
+seed: 20261011
+first_slot: 700000
+attempts: 400
+coverage:
+  rare_future_share: 0.25
+  rare_mean_events_range: [0.25, 4.0]
+  rare_horizon_fraction_range: [0.005, 0.02]
+  cold_share: 0.25
+  cold_mean_events_range: [0.1, 2.0]
+  long_labels_share: 0.25
+  long_mean_events_range: [32.0, 128.0]
+  label_history_cap: 100
+  large_support_share: 0.5
+  support_entities: 256
+  support_cutoffs_per_entity: 40
+  width_range: [1, 8]
+  relation_count_range: [1, 2]
+  text_probability: 0.2
+temporal:
+  irregular_clock_share: 0.5
+  label_publication_jitter_fraction_range: [0.05, 0.45]
+worlds:
+  NEW.auto.category: 988
+  NEW.auto.mark: 637
+  NEW.auto.numeric: 619
+  NEW.derived: 3022
+  NEW.future.count: 241
+  NEW.future.count_gt: 487
+  NEW.future.exists: 427
+  NEW.future.max: 190
+  NEW.future.mean: 133
+  NEW.future.next_category: 310
+  NEW.future.sum: 193
+  NEW.future.time_to_next: 253
+  OLD.A4.any_event: 37
+  OLD.A4.churn: 41
+  OLD.A4.count: 23
+  OLD.A4.multiclass: 19
+  OLD.A4.zero_inflated_sum: 15
+  OLD.PH.drift: 112
+  OLD.PH.meanrev: 118
+  OLD.PH.nohist: 115
+  OLD.PH.regime: 106
+  OLD.PH.seasonal: 115
+  OLD.PH.window: 112
+  OLD.SQL.own.distinct: 19
+  OLD.SQL.own.next_bucket: 10
+  OLD.SQL.own.same_category: 19
+  OLD.SQL.peer.count: 22
+  OLD.SQL.peer.count_gt_k: 19
+  OLD.SQL.peer.distinct: 25
+  OLD.SQL.peer.exists: 19
+  OLD.SQL.peer.mean: 10
+  OLD.SQL.peer.next_bucket: 22
+  OLD.SQL.peer.same_category: 25
+  OLD.SQL.peer.sum: 10
+  OLD.frank.q16: 1165
+  OLD.frank.q4: 1138
+  OLD.long.any_event: 122
+  OLD.long.churn: 173
+  OLD.long.count: 66
+  OLD.long.multiclass: 55
+  OLD.long.zero_inflated_sum: 64
+  OLD.nuisance.bagcbeta: 260
+  OLD.nuisance.bagcnorm: 250
+  OLD.nuisance.bagcpois: 187
+  OLD.nuisance.bagnsexc: 225
+  OLD.nuisance.bagnsmax: 259
+  OLD.nuisance.bagnsq90: 249
+  OLD.nuisance.feat: 541
+  OLD.nuisance.hazgap: 541
+  OLD.nuisance.haznext: 541
+  OLD.nuisance.mident: 527
+  OLD.nuisance.plookup: 541
+  OLD.nuisance.plookup2: 418
+  OLD.nuisance.plookuprec: 541
+  OLD.nuisance.qsel: 541
+  OLD.nuisance.routecnt: 385
+  OLD.nuisance.routemean: 385
+  OLD.nuisance.routeqg: 382
+  OLD.nuisance.tempk: 527
+  OLD.nuisance.tempkcpl: 527
+  OLD.rank.q16: 178
+  OLD.rank.q4: 178
+  OLD.rank.q8: 178
+  OLD.v6_own_history: 166
+fact_rows:
+  seed: 20261013
+  first_slot: 20000
+  attempts: 400
+  worlds:
+    F1: 249
+    F2: 249
+    F3: 248
+    F4: 216
+  family_config:
+    parents_range: [256, 1024]
+    items_range: [128, 1024]
+    pair_rows_range: [4096, 20000]
+    slates_range: [512, 4096]
+    max_cases: 8192
+    cutoffs_per_entity_range: [2, 8]
+    row_cap: 30000
+    history_quota_choices: [0, 8, 32, 128]
+    low_rate_range: [0.02, 0.05]
+    window_target_kinds: [count, rate_change, recency, burst, value_sum, typed_count, typed_sum, typed_mean, typed_max,
+      type_ratio]
+nuisance_prefixes:
+  bagcbeta:
+    group: OLD.nuisance.bagcbeta
+    kinds: [classification]
+  bagcbetareg:
+    group: OLD.nuisance.bagcbeta
+    kinds: [regression]
+  bagcnorm:
+    group: OLD.nuisance.bagcnorm
+    kinds: [classification]
+  bagcnormreg:
+    group: OLD.nuisance.bagcnorm
+    kinds: [regression]
+  bagcpois:
+    group: OLD.nuisance.bagcpois
+    kinds: [classification]
+  bagcpoisreg:
+    group: OLD.nuisance.bagcpois
+    kinds: [regression]
+  bagnsexc:
+    group: OLD.nuisance.bagnsexc
+    kinds: [classification]
+  bagnsexcreg:
+    group: OLD.nuisance.bagnsexc
+    kinds: [regression]
+  bagnsmax:
+    group: OLD.nuisance.bagnsmax
+    kinds: [classification]
+  bagnsmaxreg:
+    group: OLD.nuisance.bagnsmax
+    kinds: [regression]
+  bagnsq90:
+    group: OLD.nuisance.bagnsq90
+    kinds: [classification]
+  bagnsq90reg:
+    group: OLD.nuisance.bagnsq90
+    kinds: [regression]
+  featclf:
+    group: OLD.nuisance.feat
+    kinds: [classification]
+  featimb:
+    group: OLD.nuisance.feat
+    kinds: [classification]
+  featreg:
+    group: OLD.nuisance.feat
+    kinds: [regression]
+  hazgapreg:
+    group: OLD.nuisance.hazgap
+    kinds: [regression]
+  haznext:
+    group: OLD.nuisance.haznext
+    kinds: [classification]
+  mident:
+    group: OLD.nuisance.mident
+    kinds: [classification]
+  plookup:
+    group: OLD.nuisance.plookup
+    kinds: [classification, regression]
+  plookup2:
+    group: OLD.nuisance.plookup2
+    kinds: [classification, regression]
+  plookuprec:
+    group: OLD.nuisance.plookuprec
+    kinds: [classification, regression]
+  qsel:
+    group: OLD.nuisance.qsel
+    kinds: [classification]
+  qselreg:
+    group: OLD.nuisance.qsel
+    kinds: [regression]
+  routecnt:
+    group: OLD.nuisance.routecnt
+    kinds: [classification]
+  routecntreg:
+    group: OLD.nuisance.routecnt
+    kinds: [regression]
+  routemean:
+    group: OLD.nuisance.routemean
+    kinds: [classification]
+  routemeanreg:
+    group: OLD.nuisance.routemean
+    kinds: [regression]
+  routeqg:
+    group: OLD.nuisance.routeqg
+    kinds: [classification]
+  routeqgreg:
+    group: OLD.nuisance.routeqg
+    kinds: [regression]
+  tempk:
+    group: OLD.nuisance.tempk
+    kinds: [regression]
+  tempkclf:
+    group: OLD.nuisance.tempk
+    kinds: [classification]
+  tempkcpl:
+    group: OLD.nuisance.tempkcpl
+    kinds: [classification]
+  tempkcplimb:
+    group: OLD.nuisance.tempkcpl
+    kinds: [classification]
+  tempkcplreg:
+    group: OLD.nuisance.tempkcpl
+    kinds: [regression]
+  tempkimb:
+    group: OLD.nuisance.tempk
+    kinds: [classification]
+tabular:
+  replicas: 2

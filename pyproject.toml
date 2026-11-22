@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openrfm"
+version = "0.1.0"
+description = "OpenRFM: synthetic-pretrained relational foundation model, its data, training and inference"
+readme = "README.md"
+license = "MIT AND Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "openrfm/models/backbone/LICENSE"]
+requires-python = ">=3.11"
+dependencies = ["numpy", "pandas", "pyarrow", "pyyaml", "scipy", "scikit-learn", "torch", "duckdb>=1.1,<2",
+                "structured-data-models>=0.3.0", "huggingface_hub", "sentence-transformers", "requests", "ninja"]
+
+[project.optional-dependencies]
+train = ["tabicl==2.0.1"]
+sql = ["sqlalchemy>=2"]
+neo4j = ["neo4j>=5"]
+
+[project.scripts]
+openrfm = "openrfm.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["openrfm*"]
+
+[tool.setuptools.package-data]
+openrfm = ["configs/**/*.yaml", "configs/**/*.json"]
+"openrfm.sampler" = ["kernels/*.cpp", "kernels/*.h", "kernels/*.cu", "kernels/*.cuh"]

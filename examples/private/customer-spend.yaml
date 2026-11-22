@@ -1,0 +1,7 @@
+# A task of the simulated shop database (make_shop.py); the keys follow openrfm/configs/infer/tasks.yaml.
+db: shop
+table: customer-spend
+target: spend
+task_type: regression
+entity_table: customers
+horizon_s: 2592000

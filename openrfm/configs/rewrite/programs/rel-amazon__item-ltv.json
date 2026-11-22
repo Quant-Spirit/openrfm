@@ -1,0 +1,39 @@
+{
+ "kind": "schema_program_v1",
+ "dataset": "rel-amazon",
+ "task": "item-ltv",
+ "objects": [
+  {
+   "type": "keep_table",
+   "table": "product",
+   "columns": [
+    "category",
+    "brand",
+    "title",
+    "price"
+   ],
+   "rows": "all"
+  },
+  {
+   "type": "snapshot_table",
+   "name": "product__snapshot",
+   "entity": "product_id",
+   "blocks": [
+    {
+     "name": "review_demand",
+     "sql": "SELECT e.product_id, e.timestamp, COUNT(r.review_time) AS reviews_all, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '7 days') AS reviews_7d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '30 days') AS reviews_30d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days') AS reviews_91d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '182 days' AND r.review_time < e.timestamp - INTERVAL '91 days') AS reviews_previous_91d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '365 days') AS reviews_365d, DATE_DIFF('day', MAX(r.review_time), e.timestamp) AS days_since_last_review, DATE_DIFF('day', MIN(r.review_time), e.timestamp) AS days_since_first_review, AVG(r.rating) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days') AS rating_91d, AVG(CAST(r.verified AS DOUBLE)) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days') AS verified_share_91d, p.price AS product_price, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '30 days') AS recent_review_count_30d, COUNT(r.review_time) FILTER (WHERE r.review_time >= e.timestamp - INTERVAL '91 days' AND r.review_time < e.timestamp - INTERVAL '30 days') AS previous_review_count_61d FROM eval_table e LEFT JOIN product p ON p.product_id = e.product_id LEFT JOIN review r ON r.product_id = e.product_id AND r.review_time < e.timestamp GROUP BY e.product_id, e.timestamp, p.price"
+    }
+   ]
+  },
+  {
+   "type": "derived_table",
+   "name": "product_comparable_outcomes",
+   "entity": "product_id",
+   "max_rows_per_case": 3,
+   "fkeys": {
+    "peer_product_id": "product"
+   },
+   "sql": "SELECT e.product_id, e.timestamp, pp.product_id AS peer_product_id, MAX(m.timestamp) AS peer_prediction_time, ARG_MAX(m.ltv, m.timestamp) AS peer_matured_ltv, DATE_DIFF('day', MAX(m.label_window_end), e.timestamp) AS days_since_peer_window_end FROM eval_table e JOIN product p ON p.product_id = e.product_id JOIN product pp ON pp.product_id <> e.product_id AND pp.brand = p.brand AND pp.category[2] = p.category[2] AND pp.price = p.price JOIN matured_labels m ON m.product_id = pp.product_id AND m.label_window_end < e.timestamp AND m.timestamp < e.timestamp WHERE p.price >= 0 AND pp.price >= 0 AND p.brand IS NOT NULL AND p.brand <> '' AND p.category[2] IS NOT NULL GROUP BY e.product_id, e.timestamp, p.price, pp.product_id, pp.price QUALIFY ROW_NUMBER() OVER (PARTITION BY e.product_id, e.timestamp ORDER BY ABS(pp.price - p.price), MAX(m.label_window_end) DESC, pp.product_id) <= 3"
+  }
+ ]
+}
